@@ -2,11 +2,12 @@ import { getStoryById, saveSummary } from "#/server/db";
 import { enrichStory } from "#/server/extract";
 import { summarizeStory as generateSummary } from "#/server/summarize";
 import { inngest } from "../client";
-import { storyCreated } from "../events";
+import { storyCreated, storyResummarize } from "../events";
 
 /**
- * Summarizes a single story. One of these runs per new story (fanned out from
- * `scoop/story.created`), so each summary retries and scales on its own.
+ * Summarizes a single story — one run per `scoop/story.created`, so each summary
+ * retries and scales on its own. Also handles `scoop/story.resummarize`, which
+ * arrives with the summary already cleared and so flows through unchanged.
  *
  * This is the seam for scoring: once the summary is written, the next phase will
  * run an LLM-as-judge score on it right here, between the model call and the save.
@@ -22,7 +23,7 @@ export const summarizeStory = inngest.createFunction(
 		// the same storyId could both observe a NULL summary and both pay for a
 		// model call. This guarantees at most one run per story is ever in flight.
 		singleton: { key: "event.data.storyId", mode: "skip" },
-		triggers: [storyCreated],
+		triggers: [storyCreated, storyResummarize],
 	},
 	async ({ event, step }) => {
 		const storyId = event.data.storyId;

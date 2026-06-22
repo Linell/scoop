@@ -11,10 +11,15 @@ export const storyCreated = eventType("scoop/story.created", {
 	schema: z.object({ storyId: z.string() }),
 });
 
+/** A human asked to regenerate a story's summary; handled by `resummarize-story`. */
+export const storyResummarizeRequested = eventType(
+	"scoop/story.resummarize.requested",
+	{ schema: z.object({ storyId: z.string() }) },
+);
+
 /**
- * Fired to regenerate an existing summary. The `resummarize-story` function
- * clears the stored summary and re-emits `scoop/story.created`, so a refusal or
- * a summary made before the article was readable can be replaced on demand.
+ * Regenerate this story's summary now. A dedicated event (rather than re-firing
+ * `scoop/story.created`) so the log keeps "created" meaning created.
  */
 export const storyResummarize = eventType("scoop/story.resummarize", {
 	schema: z.object({ storyId: z.string() }),
@@ -39,5 +44,5 @@ export async function queueStorySummaries(storyIds: string[]): Promise<void> {
 
 /** Ask Scoop to regenerate one story's summary. */
 export async function requestResummarize(storyId: string): Promise<void> {
-	await inngest.send(storyResummarize.create({ storyId }));
+	await inngest.send(storyResummarizeRequested.create({ storyId }));
 }
