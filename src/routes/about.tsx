@@ -16,7 +16,7 @@ function About() {
 	};
 
 	return (
-		<main className="mx-auto w-full max-w-2xl px-4 pb-24">
+		<main id="main-content" className="mx-auto w-full max-w-2xl px-4 pb-24">
 			<section className="melt-in py-10 sm:py-14">
 				<p className="kicker">About</p>
 				<h1 className="scoop-title mt-3 text-[2rem] text-foreground sm:text-5xl">
@@ -77,12 +77,12 @@ function About() {
 					>
 						{cleared ? (
 							<>
-								<Check className="size-4" />
+								<Check className="size-4" aria-hidden />
 								Cleared
 							</>
 						) : (
 							<>
-								<Trash2 className="size-4" />
+								<Trash2 className="size-4" aria-hidden />
 								Reset Local Storage
 							</>
 						)}

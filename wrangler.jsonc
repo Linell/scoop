@@ -1,17 +1,17 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tanstack-start-app",
+  "name": "scoop",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
+  "observability": { "enabled": true },
   // Shared, deduped catalog of feeds + stories. Per-user subscriptions live in
   // localStorage (no auth), so this DB is global and append-mostly.
-  // For production: run `wrangler d1 create scoop` and paste the real id below.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "scoop",
-      "database_id": "local-scoop",
+      "database_id": "86a02bd6-6d45-40a1-a456-e658127d5bd1",
       "migrations_dir": "migrations"
     }
   ]

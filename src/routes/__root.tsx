@@ -43,13 +43,30 @@ export const Route = createRootRoute({
 	shellComponent: RootDocument,
 });
 
+// Apply the saved theme before first paint so there's no light-mode flash on a
+// dark-mode reload. Runs synchronously in <head>; falls back to the OS setting
+// when the visitor hasn't picked one. Mirrors the logic in site-header's toggle.
+const themeScript = `(function(){try{var t=localStorage.getItem('scoop-theme');var d=t==='dark'||(t==null&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
+
 function RootDocument({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="en">
+		// The no-flash script below sets `class="dark"` on <html> before React
+		// hydrates, based on localStorage/OS preference the server can't know. That
+		// makes the html attributes legitimately differ from the SSR output, so we
+		// suppress the (root-level, otherwise unrecoverable) hydration warning here.
+		<html lang="en" suppressHydrationWarning>
 			<head>
+				{/* biome-ignore lint/security/noDangerouslySetInnerHtml: trusted static no-flash theme script */}
+				<script dangerouslySetInnerHTML={{ __html: themeScript }} />
 				<HeadContent />
 			</head>
 			<body>
+				<a
+					href="#main-content"
+					className="focus-scoop sr-only rounded-lg bg-card px-4 py-2 font-semibold text-foreground no-underline shadow-lg focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50"
+				>
+					Skip to content
+				</a>
 				<SiteHeader />
 				{children}
 				<TanStackDevtools

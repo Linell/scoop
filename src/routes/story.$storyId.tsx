@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, ExternalLink, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Link2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { useIsAdmin } from "#/lib/admin";
@@ -42,13 +42,16 @@ function StoryPage() {
 
 	if (!detail) {
 		return (
-			<main className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-3xl flex-col items-center justify-center px-4 py-12 text-center">
+			<main
+				id="main-content"
+				className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-3xl flex-col items-center justify-center px-4 py-12 text-center"
+			>
 				<p className="text-cocoa-soft">
 					We couldn't find that scoop — it may have melted away.
 				</p>
 				<Link
 					to="/"
-					className="focus-scoop mt-6 inline-flex items-center gap-2 font-semibold text-sm text-strawberry-ink no-underline"
+					className="focus-scoop mt-6 inline-flex items-center gap-2 rounded-md font-semibold text-sm text-strawberry-ink no-underline"
 				>
 					<ArrowLeft className="size-4" />
 					Back to your scoops
@@ -58,6 +61,43 @@ function StoryPage() {
 	}
 
 	return <StoryView detail={detail} />;
+}
+
+/** Copy this story's URL, morphing the label to "Copied!" for a beat — reuses
+ * the same Check-morph pattern as the About page's reset button. */
+function CopyLinkButton() {
+	const [copied, setCopied] = useState(false);
+
+	const onCopy = async () => {
+		try {
+			await navigator.clipboard.writeText(window.location.href);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1600);
+		} catch {
+			// Clipboard may be unavailable (insecure context); fail quietly.
+		}
+	};
+
+	return (
+		<Button
+			variant="outline"
+			onClick={onCopy}
+			className="rounded-full"
+			aria-label={copied ? "Link copied" : "Copy link to this scoop"}
+		>
+			{copied ? (
+				<>
+					<Check className="size-4" aria-hidden />
+					Copied!
+				</>
+			) : (
+				<>
+					<Link2 className="size-4" aria-hidden />
+					Copy link
+				</>
+			)}
+		</Button>
+	);
 }
 
 function StoryView({ detail }: { detail: StoryDetail }) {
@@ -107,10 +147,13 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 	};
 
 	return (
-		<main className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-3xl flex-col justify-center px-4 py-12">
+		<main
+			id="main-content"
+			className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-3xl flex-col px-4 py-12"
+		>
 			<Link
 				to="/"
-				className="focus-scoop inline-flex items-center gap-2 self-start text-cocoa-soft text-sm no-underline transition-colors hover:text-foreground"
+				className="focus-scoop inline-flex items-center gap-2 self-start rounded-md text-cocoa-soft text-sm no-underline transition-colors hover:text-foreground"
 			>
 				<ArrowLeft className="size-4" />
 				Back to your scoops
@@ -142,16 +185,22 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 						{story.title}
 					</h1>
 
-					<div>
+					{/* Announce the summary swap (incl. resummarize) to screen readers. */}
+					<div aria-live="polite" aria-busy={working}>
 						<p className="kicker">The scoop</p>
 						{summary ? (
-							<p className="mt-2 text-base text-cocoa-soft leading-relaxed">
+							<p className="scoop-readable mt-2 text-base text-cocoa-soft">
 								{summary}
 							</p>
 						) : (
-							<p className="mt-2 text-cocoa-soft italic">
-								Scoop is still churning this one…
-							</p>
+							<div className="mt-3 flex items-center gap-3 text-cocoa-soft italic">
+								<span className="scoop-thinking" aria-hidden="true">
+									<i />
+									<i />
+									<i />
+								</span>
+								<span>Scoop is still churning this one…</span>
+							</div>
 						)}
 					</div>
 
@@ -167,6 +216,8 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 							<ExternalLink className="size-4" aria-hidden />
 						</a>
 
+						<CopyLinkButton />
+
 						{isAdmin ? (
 							<Button
 								variant="outline"
@@ -175,6 +226,7 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 								className="rounded-full"
 							>
 								<RefreshCw
+									aria-hidden
 									className={`size-4 ${working ? "animate-spin" : ""}`}
 								/>
 								{working ? "Re-scooping…" : "Resummarize"}

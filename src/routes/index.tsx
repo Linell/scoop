@@ -10,6 +10,7 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
 import {
 	CommandDialog,
@@ -139,7 +140,7 @@ function Home() {
 	});
 
 	return (
-		<main className="mx-auto w-full max-w-6xl px-4 pb-24">
+		<main id="main-content" className="mx-auto w-full max-w-6xl px-4 pb-24">
 			{/* Hero */}
 			<section className="melt-in py-10 sm:py-14">
 				<p className="kicker">The scoop for</p>
@@ -151,11 +152,17 @@ function Home() {
 					to="/chat"
 					className="focus-scoop mt-7 flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 no-underline shadow-sm transition-colors hover:border-strawberry"
 				>
-					<Sparkles className="size-5 shrink-0 text-strawberry-ink" />
+					<Sparkles
+						className="size-5 shrink-0 text-strawberry-ink"
+						aria-hidden
+					/>
 					<span className="truncate text-cocoa-soft">
 						Ask Scoop about today's stories…
 					</span>
-					<ArrowRight className="ml-auto size-4 shrink-0 text-cocoa-soft" />
+					<ArrowRight
+						className="ml-auto size-4 shrink-0 text-cocoa-soft"
+						aria-hidden
+					/>
 				</Link>
 			</section>
 
@@ -163,7 +170,7 @@ function Home() {
 				{/* Your flavors */}
 				<aside className="lg:sticky lg:top-20 lg:self-start">
 					<div className="flex items-center justify-between">
-						<p className="kicker">Your flavors</p>
+						<h2 className="kicker">Your flavors</h2>
 						<span className="text-xs text-cocoa-soft">
 							{hydrated ? subscriptions.length : ""}
 						</span>
@@ -189,7 +196,10 @@ function Home() {
 												: "text-cocoa-soft"
 										}`}
 									>
-										<Sparkles className="size-4 shrink-0 text-strawberry-ink" />
+										<Sparkles
+											className="size-4 shrink-0 text-strawberry-ink"
+											aria-hidden
+										/>
 										<span className="truncate">All flavors</span>
 									</button>
 								</li>
@@ -231,7 +241,7 @@ function Home() {
 													active ? "opacity-100" : "opacity-0"
 												}`}
 											>
-												<X className="size-3.5" />
+												<X className="size-3.5" aria-hidden />
 											</button>
 										</div>
 									</li>
@@ -245,7 +255,7 @@ function Home() {
 						onClick={() => setDialogOpen(true)}
 						className="mt-2 w-full justify-start rounded-full text-cocoa-soft"
 					>
-						<Plus className="size-4" />
+						<Plus className="size-4" aria-hidden />
 						Add a flavor
 					</Button>
 				</aside>
@@ -254,7 +264,7 @@ function Home() {
 				<section>
 					<div className="mb-4 flex items-baseline justify-between gap-3">
 						<div className="flex min-w-0 items-baseline gap-2">
-							<p className="kicker">Fresh scoops</p>
+							<h2 className="kicker">Fresh scoops</h2>
 							{selectedSubs.length > 0
 								? (() => {
 										const n = selectedSubs.length;
@@ -310,45 +320,56 @@ function Home() {
 						) : null}
 					</div>
 
-					{showSkeletons ? (
-						<div className="grid gap-5 sm:grid-cols-2">
-							{FLAVORS.map((flavor, i) => (
-								<ScoopCardSkeleton key={flavor} flavor={flavor} index={i} />
-							))}
-						</div>
-					) : subscriptions.length === 0 ? (
-						<EmptyState
-							onAdd={addByUrl}
-							onBrowse={() => setDialogOpen(true)}
-							isSubscribed={isSubscribed}
-						/>
-					) : stories.length === 0 ? (
-						<p className="text-cocoa-soft">
-							No stories yet — these feeds didn't churn anything we could read.
-						</p>
-					) : visibleStories.length === 0 ? (
-						<p className="text-cocoa-soft">
-							No scoops from{" "}
-							<span className="font-semibold text-foreground">
-								{selectedSubs.length === 1
-									? (feedById.get(selectedSubs[0].id)?.title ?? "this flavor")
-									: "these flavors"}
-							</span>{" "}
-							yet — it hasn't churned anything we could read.
-						</p>
-					) : (
-						<div className="grid gap-5 sm:grid-cols-2">
-							{visibleStories.map((story, i) => (
-								<ScoopCard
-									key={story.id}
-									story={story}
-									feed={feedById.get(story.feedId)}
-									flavor={flavorById.get(story.feedId) ?? "var(--strawberry)"}
-									index={i}
-								/>
-							))}
-						</div>
-					)}
+					{/* Announce loading → loaded → empty transitions (and the result
+					    count change when a flavor filter is toggled). */}
+					<div aria-live="polite" aria-busy={showSkeletons}>
+						{showSkeletons ? (
+							<div className="grid gap-5 sm:grid-cols-2">
+								<output className="sr-only">Loading fresh scoops…</output>
+								{FLAVORS.map((flavor, i) => (
+									<ScoopCardSkeleton key={flavor} flavor={flavor} index={i} />
+								))}
+							</div>
+						) : subscriptions.length === 0 ? (
+							<EmptyState
+								onAdd={addByUrl}
+								onBrowse={() => setDialogOpen(true)}
+								isSubscribed={isSubscribed}
+							/>
+						) : stories.length === 0 ? (
+							<EmptyScoops>
+								No stories yet — these feeds didn't churn anything we could
+								read.
+							</EmptyScoops>
+						) : visibleStories.length === 0 ? (
+							<EmptyScoops>
+								No scoops from{" "}
+								<span className="font-semibold text-foreground">
+									{selectedSubs.length === 1
+										? (feedById.get(selectedSubs[0].id)?.title ?? "this flavor")
+										: "these flavors"}
+								</span>{" "}
+								yet — it hasn't churned anything we could read.
+							</EmptyScoops>
+						) : (
+							// Key the grid on the active filter so toggling a flavor re-runs
+							// the staggered melt-in — the feed "re-scoops" rather than swapping.
+							<div
+								key={selectedSubs.map((s) => s.id).join(",") || "all"}
+								className="grid gap-5 sm:grid-cols-2"
+							>
+								{visibleStories.map((story, i) => (
+									<ScoopCard
+										key={story.id}
+										story={story}
+										feed={feedById.get(story.feedId)}
+										flavor={flavorById.get(story.feedId) ?? "var(--strawberry)"}
+										index={i}
+									/>
+								))}
+							</div>
+						)}
+					</div>
 				</section>
 			</div>
 
@@ -418,10 +439,24 @@ function ScoopCard({
 
 				<div className="mt-auto flex items-center gap-1.5 pt-1 font-semibold text-sm text-strawberry-ink">
 					Read the full scoop
-					<ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+					<ArrowRight
+						className="size-4 transition-transform group-hover:translate-x-0.5"
+						aria-hidden
+					/>
 				</div>
 			</div>
 		</Link>
+	);
+}
+
+/** A gently-designed "nothing here yet" card, so empty states match the warmth
+ * of the loading skeletons rather than reading as a bare line of text. */
+function EmptyScoops({ children }: { children: React.ReactNode }) {
+	return (
+		<div className="whip-card flex flex-col items-center gap-3 p-8 text-center">
+			<ScoopLogo className="h-10 w-10 opacity-70 grayscale" />
+			<p className="max-w-[44ch] text-cocoa-soft">{children}</p>
+		</div>
 	);
 }
 
@@ -435,11 +470,19 @@ function EmptyState({
 	isSubscribed: (id: string) => boolean;
 }) {
 	const [busy, setBusy] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
 
 	const add = async (url: string) => {
 		setBusy(url);
-		await onAdd(url);
-		setBusy(null);
+		setError(null);
+		try {
+			const err = await onAdd(url);
+			if (err) setError(err);
+		} catch {
+			setError("Something went wrong adding that feed.");
+		} finally {
+			setBusy(null);
+		}
 	};
 
 	return (
@@ -447,6 +490,11 @@ function EmptyState({
 			<p className="max-w-[40ch] text-cocoa-soft">
 				No flavors yet. Browse the scoop shop, or start with one of these:
 			</p>
+			{error ? (
+				<p role="alert" className="text-sm text-strawberry-ink">
+					{error}
+				</p>
+			) : null}
 			<div className="flex flex-wrap justify-center gap-2">
 				{SUGGESTED.map((s) => (
 					<button
@@ -457,16 +505,16 @@ function EmptyState({
 						className="focus-scoop inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2 text-sm text-cocoa-soft shadow-sm transition-colors hover:border-strawberry hover:text-foreground disabled:opacity-50"
 					>
 						{busy === s.url ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Loader2 className="size-3.5 animate-spin" aria-hidden />
 						) : (
-							<Plus className="size-3.5" />
+							<Plus className="size-3.5" aria-hidden />
 						)}
 						{s.title}
 					</button>
 				))}
 			</div>
 			<Button onClick={onBrowse} className="rounded-full">
-				<Sparkles className="size-4" />
+				<Sparkles className="size-4" aria-hidden />
 				Browse all flavors
 			</Button>
 		</div>
@@ -575,12 +623,16 @@ function BrowseFlavorsDialog({
 			shouldFilter={false}
 		>
 			<CommandInput
+				aria-label="Search every flavor, or paste a feed URL"
 				placeholder="Search every flavor, or paste a feed URL…"
 				value={query}
 				onValueChange={setQuery}
 			/>
 			{error ? (
-				<p className="border-border border-b px-4 py-2 text-sm text-strawberry-ink">
+				<p
+					role="alert"
+					className="border-border border-b px-4 py-2 text-sm text-strawberry-ink"
+				>
 					{error}
 				</p>
 			) : null}
@@ -629,7 +681,7 @@ function BrowseFlavorsDialog({
 							onSelect={() => setCategory(null)}
 							className="text-cocoa-soft"
 						>
-							<ArrowLeft className="size-4" />
+							<ArrowLeft className="size-4" aria-hidden />
 							All categories
 						</CommandItem>
 						{current.feeds.map((feed) => (
@@ -666,7 +718,7 @@ function CategoryRow({
 		<CommandItem value={`cat:${category}`} onSelect={onSelect}>
 			<span className="truncate text-foreground">{category}</span>
 			<span className="ml-auto shrink-0 text-cocoa-soft text-xs">{count}</span>
-			<ChevronRight className="size-4 shrink-0 text-cocoa-soft" />
+			<ChevronRight className="size-4 shrink-0 text-cocoa-soft" aria-hidden />
 		</CommandItem>
 	);
 }
@@ -711,11 +763,14 @@ function FeedRow({
 			</div>
 			<span className="ml-auto shrink-0 text-cocoa-soft">
 				{busy ? (
-					<Loader2 className="size-4 animate-spin" />
+					<Loader2 className="size-4 animate-spin" aria-label="Adding…" />
 				) : added ? (
-					<Check className="size-4 text-accent-foreground" />
+					<Check
+						className="size-4 text-accent-foreground"
+						aria-label="Already added"
+					/>
 				) : (
-					<Plus className="size-4" />
+					<Plus className="size-4" aria-hidden />
 				)}
 			</span>
 		</CommandItem>
@@ -755,6 +810,7 @@ function ScoopCardSkeleton({
 		<div
 			className="whip-card melt-in flex h-full flex-col overflow-hidden text-left"
 			style={{ animationDelay: `${index * 60}ms` }}
+			aria-hidden="true"
 		>
 			<div
 				className="flavor-band h-2 w-full"

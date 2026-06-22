@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "#/components/markdown";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
-import { Skeleton } from "#/components/ui/skeleton";
 import { type ChatCitation, storyToCitation } from "#/lib/citation";
 import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import type { Feed, Story } from "#/lib/types";
@@ -154,9 +153,14 @@ function Chat() {
 			: null;
 
 	// Keep the latest turn in view as the conversation and skeleton change.
+	// Honor reduced-motion: JS smooth-scroll bypasses the CSS guards and can be
+	// disorienting for vestibular users, so fall back to an instant jump.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-running on each message/pending change is the intent; the body only reads a ref.
 	useEffect(() => {
-		endRef.current?.scrollIntoView({ behavior: "smooth" });
+		const reduce =
+			typeof window !== "undefined" &&
+			window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		endRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
 	}, [messages, pending]);
 
 	const send = async (text: string) => {
@@ -207,7 +211,10 @@ function Chat() {
 	const empty = messages.length === 0;
 
 	return (
-		<main className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col px-4">
+		<main
+			id="main-content"
+			className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col px-4"
+		>
 			<div className="flex-1 space-y-8 py-10">
 				<header className="melt-in">
 					<p className="kicker">Ask Scoop</p>
@@ -245,21 +252,24 @@ function Chat() {
 					</section>
 				) : null}
 
-				{messages.map((message) =>
-					message.role === "user" ? (
-						<UserBubble key={message.id} text={message.content} />
-					) : (
-						<Answer
-							key={message.id}
-							text={message.content}
-							citations={message.citations ?? []}
-							flavorByFeed={flavorByFeed}
-							cid={conversationId.current ?? undefined}
-						/>
-					),
-				)}
+				{/* Announce new turns + the thinking indicator to screen readers. */}
+				<div className="space-y-8" aria-live="polite" aria-busy={pending}>
+					{messages.map((message) =>
+						message.role === "user" ? (
+							<UserBubble key={message.id} text={message.content} />
+						) : (
+							<Answer
+								key={message.id}
+								text={message.content}
+								citations={message.citations ?? []}
+								flavorByFeed={flavorByFeed}
+								cid={conversationId.current ?? undefined}
+							/>
+						),
+					)}
 
-				{pending ? <AnswerSkeleton /> : null}
+					{pending ? <AnswerSkeleton /> : null}
+				</div>
 
 				{followups ? (
 					<div className="melt-in pl-12">
@@ -283,6 +293,7 @@ function Chat() {
 							}
 						}}
 						disabled={!hydrated}
+						aria-label="Ask Scoop anything"
 						placeholder="Ask Scoop anything…"
 						className="max-h-40 flex-1 resize-none bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-cocoa-soft"
 					/>
@@ -290,9 +301,11 @@ function Chat() {
 						size="icon"
 						onClick={() => send(draft)}
 						disabled={pending || !draft.trim()}
+						aria-label="Send message"
+						aria-busy={pending}
 						className="size-11 shrink-0 rounded-xl"
 					>
-						<ArrowUp className="size-4" />
+						<ArrowUp className="size-4" aria-hidden />
 					</Button>
 				</div>
 				<p className="mt-2 text-center text-xs text-cocoa-soft">
@@ -405,7 +418,10 @@ function CitedScoop({
 				</p>
 				<p className="truncate text-cocoa-soft text-xs">{citation.feedTitle}</p>
 			</div>
-			<ExternalLink className="size-4 shrink-0 text-strawberry-ink transition-transform group-hover:translate-x-0.5" />
+			<ExternalLink
+				className="size-4 shrink-0 text-strawberry-ink transition-transform group-hover:translate-x-0.5"
+				aria-hidden
+			/>
 		</a>
 	);
 }
@@ -416,10 +432,13 @@ function AnswerSkeleton() {
 			<div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-card">
 				<ScoopLogo className="h-7 w-7" />
 			</div>
-			<div className="min-w-0 flex-1 space-y-2 pt-2">
-				<Skeleton className="h-3.5 w-full rounded-full" />
-				<Skeleton className="h-3.5 w-full rounded-full" />
-				<Skeleton className="h-3.5 w-[72%] rounded-full" />
+			<div className="flex min-w-0 flex-1 items-center pt-1">
+				<span className="scoop-thinking" aria-hidden="true">
+					<i />
+					<i />
+					<i />
+				</span>
+				<output className="sr-only">Scoop is thinking…</output>
 			</div>
 		</div>
 	);

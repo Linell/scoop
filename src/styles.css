@@ -186,11 +186,18 @@ body,
       radial-gradient(720px 420px at 8% -6%, color-mix(in oklab, var(--strawberry) 30%, transparent), transparent 60%),
       radial-gradient(680px 420px at 96% -4%, color-mix(in oklab, var(--mint) 30%, transparent), transparent 60%),
       radial-gradient(620px 460px at 50% 112%, color-mix(in oklab, var(--blueberry) 22%, transparent), transparent 64%);
-    background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     /* No negative tracking on body text — honor the accessibility face. */
     overflow-x: hidden;
+  }
+  /* `fixed` keeps the sprinkle glow parked while scrolling, but on mobile Safari
+   * that forces a full-page repaint every frame (scroll jank). Only pin it where
+   * it's cheap — desktop. On small screens the glow just rides along with content. */
+  @media (min-width: 768px) {
+    body {
+      background-attachment: fixed;
+    }
   }
 }
 
@@ -342,12 +349,6 @@ body,
   margin-left: -0.3rem;
 }
 
-/* Keep the focus ring hugging these pill shapes rather than the default radius. */
-.flavor-chip.focus-scoop:focus-visible,
-.flavor-row.focus-scoop:focus-visible {
-  border-radius: 999px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .flavor-dot,
   .flavor-row,
@@ -373,13 +374,16 @@ body,
   }
 }
 
-/* Shared visible keyboard focus for hand-rolled interactive elements */
+/* Shared visible keyboard focus for hand-rolled interactive elements. The ring
+ * is a box-shadow, so it traces whatever border-radius the element already
+ * carries (rounded-full pills, rounded-2xl CTAs, the whip-card's radius-xl) —
+ * we deliberately don't set border-radius here so it always hugs the real shape.
+ * Elements with no radius of their own should add a Tailwind rounding utility. */
 .focus-scoop:focus-visible {
   outline: none;
   box-shadow:
     0 0 0 2px var(--background),
     0 0 0 4px var(--strawberry);
-  border-radius: var(--radius);
 }
 
 .melt-in {
@@ -402,4 +406,149 @@ body,
     animation: none;
     transition: none;
   }
+}
+
+/*
+ * Press feedback ("squish"). Hover/focus states existed everywhere but nothing
+ * responded to the press itself — on touch (no hover) a tap felt dead until the
+ * navigation happened. A tiny scale-down on :active is the cheapest "I felt
+ * that," felt on every interaction. Capped shallow so it reads as a press, not a
+ * bounce. The button base adds active:scale-[0.97] via its className.
+ */
+.whip-card-hover:active {
+  transform: translateY(-1px) scale(0.992);
+}
+.flavor-row:active {
+  transform: scale(0.985);
+}
+
+/* Three bouncing scoops as Scoop's "thinking" indicator while a chat reply is in
+ * flight — far warmer than generic skeleton bars, and on-brand under the logo. */
+.scoop-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.scoop-thinking i {
+  display: block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  animation: scoop-bounce 1.1s ease-in-out infinite;
+}
+.scoop-thinking i:nth-child(1) {
+  background: var(--strawberry);
+  animation-delay: 0s;
+}
+.scoop-thinking i:nth-child(2) {
+  background: var(--mint);
+  animation-delay: 0.15s;
+}
+.scoop-thinking i:nth-child(3) {
+  background: var(--blueberry);
+  animation-delay: 0.3s;
+}
+@keyframes scoop-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  40% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* The header logo gives a little hello-wiggle on hover — the scoop nodding. */
+.scoop-logo-link svg {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.scoop-logo-link:hover svg {
+  animation: scoop-wiggle 520ms ease;
+}
+@keyframes scoop-wiggle {
+  25% {
+    transform: rotate(-7deg);
+  }
+  60% {
+    transform: rotate(5deg);
+  }
+  100% {
+    transform: rotate(0);
+  }
+}
+
+/* Triple-click the logo for a one-off sprinkle shower (pays off "extra sprinkles
+ * 🍦" on the About page). Pure CSS fall; the React layer mounts/unmounts it. */
+.sprinkle-shower {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sprinkle {
+  position: absolute;
+  top: -5%;
+  width: 0.5rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  opacity: 0;
+  animation: sprinkle-fall var(--dur, 2.4s) cubic-bezier(0.4, 0.1, 0.7, 1) forwards;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes sprinkle-fall {
+  0% {
+    transform: translateY(-10vh) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) rotate(var(--spin, 540deg));
+    opacity: 0;
+  }
+}
+
+/*
+ * Reduced-motion safety net. The hand-rolled helpers above were already guarded,
+ * but Tailwind's animate-spin/animate-pulse and tw-animate-css's data-state
+ * enter/exit animations (Radix dialog/overlay) run regardless. Neutralize them
+ * all in one place for vestibular users.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse,
+  .scoop-thinking i,
+  .scoop-logo-link:hover svg,
+  .sprinkle {
+    animation: none;
+  }
+  .scoop-logo-link svg {
+    transition: none;
+  }
+  .whip-card-hover:active,
+  .flavor-row:active {
+    transform: none;
+  }
+  /* tw-animate-css enter/exit utilities used by the dialog + overlay */
+  [data-slot='dialog-content'],
+  [data-slot='dialog-overlay'] {
+    animation: none !important;
+  }
+  /* A reduced-motion sprinkle just appears statically then fades — no fall. */
+  .sprinkle {
+    opacity: 0;
+  }
+}
+
+/* Long-form reading: the story summary is the one place body-size monospace runs
+ * for multiple lines, where an over-wide measure + tight leading tires the eye.
+ * Cap the measure near 62ch and open the leading up for mono. */
+.scoop-readable {
+  max-width: 62ch;
+  line-height: 1.75;
 }
