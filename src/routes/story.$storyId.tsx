@@ -5,7 +5,7 @@ import { Button } from "#/components/ui/button";
 import { useIsAdmin } from "#/lib/admin";
 import { FLAVORS } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
-import { hashId } from "#/lib/url";
+import { hashId, storyClickHref } from "#/lib/url";
 import type { StoryDetail } from "#/server/feeds";
 import { getStory, resummarizeStory } from "#/server/feeds";
 
@@ -157,7 +157,7 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 
 					<div className="flex flex-wrap items-center gap-3 pt-1">
 						<a
-							href={story.url}
+							href={storyClickHref(story.id, "story")}
 							target="_blank"
 							rel="noreferrer"
 							aria-label="Read the original article (opens in a new tab)"

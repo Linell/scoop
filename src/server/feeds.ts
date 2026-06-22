@@ -1,5 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { queueStorySummaries, requestResummarize } from "#/inngest/events";
+import {
+	queueStorySummaries,
+	recordStoryClick,
+	requestResummarize,
+} from "#/inngest/events";
 import { FeedError } from "#/lib/rss";
 import type { Feed, Story } from "#/lib/types";
 import {
@@ -24,12 +28,15 @@ function validateUrl(input: unknown): string {
 	return input.trim();
 }
 
+// Cap the fan-out so a tampered client can't ask for thousands at once. Shared
+// so every endpoint that takes feed ids (feeds, stories, chat) bounds the same.
+export const MAX_FEED_IDS = 200;
+
 function validateIds(input: unknown): string[] {
 	if (!Array.isArray(input) || input.some((id) => typeof id !== "string")) {
 		throw new Error("Expected an array of feed ids.");
 	}
-	// Cap the fan-out so a tampered client can't ask for thousands at once.
-	return (input as string[]).slice(0, 200);
+	return (input as string[]).slice(0, MAX_FEED_IDS);
 }
 
 function validateId(input: unknown): string {
@@ -79,6 +86,27 @@ export const getStory = createServerFn({ method: "POST" })
 		if (!story) return null;
 		const [feed] = await getFeedsByIds([story.feedId]);
 		return { story, feed: feed ?? null };
+	});
+
+/**
+ * Record a feed-card open as a durable click signal (`from: "feed"`), so feed
+ * engagement is scoreable alongside chat and story-detail clicks. Opening a card
+ * navigates in-app rather than out to the source, so — unlike chat/story links —
+ * it can't ride the /r/ redirect; this server fn is the feed's equivalent hook.
+ * Best-effort: a tracking hiccup must never block the reader's navigation.
+ */
+export const recordStoryOpen = createServerFn({ method: "POST" })
+	.validator(validateId)
+	.handler(async ({ data: id }): Promise<{ ok: boolean }> => {
+		const story = await getStoryById(id);
+		if (!story) return { ok: false };
+		await recordStoryClick({
+			storyId: story.id,
+			feedId: story.feedId,
+			url: story.url,
+			from: "feed",
+		}).catch(() => {});
+		return { ok: true };
 	});
 
 /**

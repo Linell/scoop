@@ -34,6 +34,21 @@ export const feedRefreshRequested = eventType("scoop/feed.refresh.requested", {
 	schema: z.object({ feedUrl: z.string() }),
 });
 
+/**
+ * An outbound click on a story, captured by the /r/$storyId redirect. No
+ * consumer yet — it's the durable signal scoring will grade later, and (when a
+ * conversation id rides along on the send) the click that ties a chat session
+ * to the article it drove the reader to.
+ */
+export const storyClicked = eventType("scoop/story.clicked", {
+	schema: z.object({
+		storyId: z.string(),
+		feedId: z.string(),
+		url: z.string(),
+		from: z.string(),
+	}),
+});
+
 /** Best-effort: enqueue a summary job for each new story id. */
 export async function queueStorySummaries(storyIds: string[]): Promise<void> {
 	if (storyIds.length === 0) return;
@@ -45,4 +60,27 @@ export async function queueStorySummaries(storyIds: string[]): Promise<void> {
 /** Ask Scoop to regenerate one story's summary. */
 export async function requestResummarize(storyId: string): Promise<void> {
 	await inngest.send(storyResummarizeRequested.create({ storyId }));
+}
+
+type StoryClick = {
+	storyId: string;
+	feedId: string;
+	url: string;
+	from: string;
+};
+
+/**
+ * Record an outbound click. A `conversationId` is attached as a session so the
+ * click and the chat turn that produced it share one session in the dashboard.
+ */
+export async function recordStoryClick(
+	click: StoryClick,
+	conversationId?: string,
+): Promise<void> {
+	await inngest.send({
+		...storyClicked.create(click),
+		...(conversationId && {
+			meta: { sessions: { conversation_id: conversationId } },
+		}),
+	});
 }

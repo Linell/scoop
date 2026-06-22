@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
 
@@ -15,8 +15,8 @@ export function SiteHeader() {
 					<span className="scoop-title text-xl text-foreground">scoop</span>
 				</Link>
 
-				{/* Feed is reachable via the logo; on mobile we keep the flagship
-				    "Ask Scoop" link visible and drop the redundant Feed tab. */}
+				{/* Quiet secondary links. Feed is reachable via the logo too, so we
+				    drop the redundant Feed tab on mobile to keep the bar uncluttered. */}
 				<nav className="ml-1 flex items-center gap-1 text-sm">
 					<Link
 						to="/"
@@ -25,19 +25,18 @@ export function SiteHeader() {
 					>
 						Feed
 					</Link>
-					<Link to="/chat" className={navLink}>
-						Ask Scoop
-					</Link>
 					<Link to="/about" className={navLink}>
 						About
 					</Link>
 				</nav>
 
+				{/* Flagship action gets the prime right-hand slot as a filled CTA. */}
 				<div className="ml-auto">
-					{/* Full label on desktop, icon-only on mobile so it never clips */}
-					<Button size="sm" className="rounded-full max-sm:size-9 max-sm:p-0">
-						<Plus className="size-4" />
-						<span className="max-sm:sr-only">Add a flavor</span>
+					<Button asChild size="sm" className="rounded-full">
+						<Link to="/chat" className="no-underline">
+							<Sparkles className="size-4" />
+							Ask Scoop
+						</Link>
 					</Button>
 				</div>
 			</div>

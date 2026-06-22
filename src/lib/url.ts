@@ -44,3 +44,22 @@ export function normalizeUrl(raw: string): string {
 export function feedIdForUrl(rawUrl: string): string {
 	return hashId(normalizeUrl(rawUrl));
 }
+
+/** Surfaces that can send a reader to an article, for click attribution. */
+export type ClickSource = "chat" | "story" | "feed";
+
+/**
+ * Link to an article through the click tracker (/r/$storyId) instead of straight
+ * to its url, so every outbound click is captured. `cid` ties a chat click to its
+ * conversation session; omit it on other surfaces. Used everywhere so all links
+ * are built identically.
+ */
+export function storyClickHref(
+	storyId: string,
+	from: ClickSource,
+	cid?: string,
+): string {
+	const params = new URLSearchParams({ from });
+	if (cid) params.set("cid", cid);
+	return `/r/${storyId}?${params}`;
+}

@@ -25,7 +25,12 @@ import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { CatalogFeed, Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
-import { addFeed, getFeeds, getStories } from "#/server/feeds";
+import {
+	addFeed,
+	getFeeds,
+	getStories,
+	recordStoryOpen,
+} from "#/server/feeds";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -372,6 +377,10 @@ function ScoopCard({
 		<Link
 			to="/story/$storyId"
 			params={{ storyId: story.id }}
+			// Fire-and-forget the click signal; never block the in-app navigation.
+			onClick={() => {
+				recordStoryOpen({ data: story.id }).catch(() => {});
+			}}
 			className="whip-card whip-card-hover focus-scoop melt-in group flex h-full flex-col overflow-hidden text-left no-underline"
 			style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
 		>

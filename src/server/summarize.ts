@@ -1,7 +1,6 @@
-import { env } from "cloudflare:workers";
-import Anthropic from "@anthropic-ai/sdk";
 import type { Story } from "#/lib/types";
 import type { EnrichedContent } from "#/server/extract";
+import { anthropic, MODELS, textOf } from "#/server/llm";
 
 /**
  * Turns a story into a short summary via Claude. Fast + cheap (Haiku) but still
@@ -13,8 +12,6 @@ import type { EnrichedContent } from "#/server/extract";
  * the gist of the reader discussion. The model is told the input may include
  * those so it synthesizes one summary rather than describing each piece.
  */
-
-const MODEL = "claude-haiku-4-5";
 
 const SYSTEM = `You write short summaries of news and blog stories for an RSS reader.
 The input may include the story's feed blurb, the article's full text, and a sample of the reader discussion. Synthesize across everything provided.
@@ -61,19 +58,14 @@ export async function summarizeStory(
 
 	const source = parts.join("\n\n").slice(0, MAX_SOURCE_CHARS);
 
-	const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-	const message = await client.messages.create({
-		model: MODEL,
+	const message = await anthropic().messages.create({
+		model: MODELS.summary,
 		max_tokens: 384,
 		system: SYSTEM,
 		messages: [{ role: "user", content: source }],
 	});
 
-	const summary = message.content
-		.filter((block): block is Anthropic.TextBlock => block.type === "text")
-		.map((block) => block.text)
-		.join("")
-		.trim();
+	const summary = textOf(message);
 
 	// Backstop: if the model still refused (or returned nothing), fall back to
 	// the title rather than caching a refusal
