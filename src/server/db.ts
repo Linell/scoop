@@ -18,6 +18,13 @@ const db = () => env.DB;
 // Newest N stories we keep visible per feed. Plenty for a demo; keeps cards fresh.
 const STORIES_PER_FEED = 40;
 
+// Soft cap: how many stories one feed may hold in the main (recency-ordered)
+// band before its surplus is demoted to the tail. This thins a chatty or
+// freshly-imported feed that would otherwise clump a run of cards together,
+// without ever promoting an older story above a newer one — surplus only
+// moves down.
+const MAX_PER_FEED = 3;
+
 type FeedRow = {
 	id: string;
 	feed_url: string;
@@ -34,7 +41,8 @@ type StoryRow = {
 	title: string;
 	author: string | null;
 	content: string | null;
-	published_at: number;
+	published_at: number | null;
+	created_at: number;
 	summary: string | null;
 };
 
@@ -179,26 +187,51 @@ export async function getFeedsByIds(ids: string[]): Promise<Feed[]> {
 	return ids.map((id) => byId.get(id)).filter((f): f is Feed => f != null);
 }
 
+/** A row's effective sort key: its publish date, or ingest time if unknown. */
+const sortKey = (r: StoryRow): number => r.published_at ?? r.created_at;
+
 /** Newest stories across the given feeds, most recent first. */
 export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 	if (ids.length === 0) return [];
 	const rows = await queryByIdChunks<StoryRow>(ids, async (slice) => {
 		const placeholders = slice.map(() => "?").join(", ");
-		const limit = slice.length * STORIES_PER_FEED;
+		// Limit PER FEED, not globally: rank each feed's stories by recency and
+		// keep its newest STORIES_PER_FEED. A single feed whose stories all sort
+		// to the top (e.g. one with no publish dates, stamped at ingest time)
+		// must not consume a shared LIMIT and starve the others out of the result.
 		const { results } = await db()
 			.prepare(
-				`SELECT * FROM stories
-				 WHERE feed_id IN (${placeholders})
-				 ORDER BY published_at DESC
-				 LIMIT ?`,
+				`SELECT * FROM (
+				   SELECT *, ROW_NUMBER() OVER (
+				     PARTITION BY feed_id
+				     ORDER BY COALESCE(published_at, created_at) DESC
+				   ) AS rn
+				   FROM stories
+				   WHERE feed_id IN (${placeholders})
+				 )
+				 WHERE rn <= ?`,
 			)
-			.bind(...slice, limit)
+			.bind(...slice, STORIES_PER_FEED)
 			.all<StoryRow>();
 		return results;
 	});
 
 	// Each chunk is sorted on its own; re-sort once the chunks are merged.
-	return rows.sort((a, b) => b.published_at - a.published_at).map(toStory);
+	rows.sort((a, b) => sortKey(b) - sortKey(a));
+
+	// Soft per-feed cap: walk the recency-ordered list, keeping the first
+	// MAX_PER_FEED from each feed in the main band and demoting the rest to a
+	// tail. Both bands stay in recency order, so we only ever push a feed's
+	// surplus down — never lift an older story up.
+	const main: StoryRow[] = [];
+	const tail: StoryRow[] = [];
+	const seen = new Map<string, number>();
+	for (const row of rows) {
+		const count = seen.get(row.feed_id) ?? 0;
+		seen.set(row.feed_id, count + 1);
+		(count < MAX_PER_FEED ? main : tail).push(row);
+	}
+	return [...main, ...tail].map(toStory);
 }
 
 /** A single story by id (used by the summarize job). */

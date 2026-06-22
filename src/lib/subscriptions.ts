@@ -88,11 +88,18 @@ export function useSubscriptions() {
 		[subs],
 	);
 
+	// Forget every flavor — the whole point of the About page's reset button.
+	const clear = useCallback(() => {
+		setSubs([]);
+		write([]);
+	}, []);
+
 	return {
 		subscriptions: subs,
 		hydrated,
 		subscribe,
 		unsubscribe,
 		isSubscribed,
+		clear,
 	};
 }

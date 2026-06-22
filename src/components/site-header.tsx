@@ -28,6 +28,9 @@ export function SiteHeader() {
 					<Link to="/chat" className={navLink}>
 						Ask Scoop
 					</Link>
+					<Link to="/about" className={navLink}>
+						About
+					</Link>
 				</nav>
 
 				<div className="ml-auto">

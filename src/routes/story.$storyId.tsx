@@ -12,6 +12,17 @@ import { getStory, resummarizeStory } from "#/server/feeds";
 export const Route = createFileRoute("/story/$storyId")({
 	// Fetch on the server so the page (and its summary) is there on first paint.
 	loader: ({ params }) => getStory({ data: params.storyId }),
+	// Title the browser tab (and link previews) with the story itself.
+	head: ({ loaderData }) => {
+		const story = loaderData?.story;
+		if (!story) return { meta: [{ title: "Not found — Scoop" }] };
+		const meta: Array<Record<string, string>> = [
+			{ title: `${story.title} — Scoop` },
+		];
+		if (story.summary)
+			meta.push({ name: "description", content: story.summary });
+		return { meta };
+	},
 	component: StoryPage,
 });
 
@@ -31,7 +42,7 @@ function StoryPage() {
 
 	if (!detail) {
 		return (
-			<main className="mx-auto w-full max-w-3xl px-4 py-16 text-center">
+			<main className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-3xl flex-col items-center justify-center px-4 py-12 text-center">
 				<p className="text-cocoa-soft">
 					We couldn't find that scoop — it may have melted away.
 				</p>
@@ -96,10 +107,10 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 	};
 
 	return (
-		<main className="mx-auto w-full max-w-3xl px-4 pb-24">
+		<main className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-3xl flex-col justify-center px-4 py-12">
 			<Link
 				to="/"
-				className="focus-scoop mt-8 inline-flex items-center gap-2 text-cocoa-soft text-sm no-underline transition-colors hover:text-foreground"
+				className="focus-scoop inline-flex items-center gap-2 self-start text-cocoa-soft text-sm no-underline transition-colors hover:text-foreground"
 			>
 				<ArrowLeft className="size-4" />
 				Back to your scoops
@@ -127,7 +138,7 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 						<span>{relativeTime(story.publishedAt)}</span>
 					</div>
 
-					<h1 className="scoop-title text-2xl text-foreground leading-tight sm:text-4xl">
+					<h1 className="scoop-title text-2xl text-foreground leading-[1.12] sm:text-4xl">
 						{story.title}
 					</h1>
 
@@ -149,10 +160,11 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 							href={story.url}
 							target="_blank"
 							rel="noreferrer"
+							aria-label="Read the original article (opens in a new tab)"
 							className="focus-scoop inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 font-semibold text-primary-foreground text-sm no-underline transition-colors hover:bg-primary/90"
 						>
 							Read the original
-							<ExternalLink className="size-4" />
+							<ExternalLink className="size-4" aria-hidden />
 						</a>
 
 						{isAdmin ? (

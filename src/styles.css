@@ -203,11 +203,16 @@ body,
   color: var(--cocoa-soft);
 }
 
-.scoop-title {
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 0.98;
-  text-wrap: balance;
+/* In @layer components so per-element utilities (e.g. leading-*) can override
+ * these defaults. Unlayered, it would beat Tailwind's utilities regardless of
+ * specificity. */
+@layer components {
+  .scoop-title {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 0.98;
+    text-wrap: balance;
+  }
 }
 
 /* Whipped card: soft, heavily rounded, gentle shadow */
@@ -243,20 +248,129 @@ body,
   height: 0.7rem;
   border-radius: 999px;
   background: var(--flavor, var(--strawberry));
+  transition: box-shadow 160ms ease, transform 160ms ease;
   /* hairline cocoa edge gives pale flavors (lemon/mango) definition on cream */
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--flavor, var(--strawberry)) 65%, var(--cocoa)),
     0 0 0 4px color-mix(in oklab, var(--flavor, var(--strawberry)) 20%, transparent);
 }
 
-a {
-  color: var(--strawberry-ink);
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1.5px;
-  text-decoration-color: color-mix(in oklab, var(--strawberry-ink) 45%, transparent);
+/*
+ * Flavor filter affordances. The selected flavor's own --flavor color bleeds
+ * through the row and the header chip, so focusing a flavor feels like scooping
+ * that flavor rather than landing on a generic pink fill.
+ */
+
+/* A sidebar row tinted by the flavor it represents. */
+.flavor-row {
+  position: relative;
+  transition: background-color 160ms ease;
 }
-a:hover {
+.flavor-row::before {
+  /* A little melting "drip" of the flavor down the left edge when active. */
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 999px;
+  background: var(--flavor, var(--strawberry));
+  transform: translateY(-50%);
+  transition: height 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.flavor-row:hover {
+  background: color-mix(in oklab, var(--flavor, var(--strawberry)) 12%, transparent);
+}
+.flavor-row[data-active='true'] {
+  background: color-mix(in oklab, var(--flavor, var(--strawberry)) 22%, transparent);
+}
+.flavor-row[data-active='true']::before {
+  height: 1.4rem;
+}
+.flavor-row[data-active='true'] .flavor-dot {
+  transform: scale(1.12);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--flavor, var(--strawberry)) 65%, var(--cocoa)),
+    0 0 0 5px color-mix(in oklab, var(--flavor, var(--strawberry)) 32%, transparent);
+}
+
+/* The active-filter chip in the "Fresh scoops" header. */
+.flavor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.35rem 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--flavor, var(--strawberry)) 20%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--flavor, var(--strawberry)) 45%, var(--border));
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.flavor-chip:hover {
+  background: color-mix(in oklab, var(--flavor, var(--strawberry)) 30%, var(--card));
+  border-color: color-mix(in oklab, var(--flavor, var(--strawberry)) 60%, var(--border));
+}
+.flavor-chip__x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  color: var(--cocoa-soft);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.flavor-chip:hover .flavor-chip__x {
+  background: color-mix(in oklab, var(--flavor, var(--strawberry)) 38%, transparent);
   color: var(--cocoa);
+}
+/* Stacked flavor dots in the chip when more than one flavor is focused: a crisp
+ * card-colored ring (instead of the dot's usual halo) lets them overlap like a
+ * little scoop of coins rather than blurring together. */
+.flavor-chip__dots {
+  display: inline-flex;
+  align-items: center;
+}
+.flavor-chip__dots .flavor-dot {
+  box-shadow: 0 0 0 2px var(--card);
+}
+.flavor-chip__dots .flavor-dot + .flavor-dot {
+  margin-left: -0.3rem;
+}
+
+/* Keep the focus ring hugging these pill shapes rather than the default radius. */
+.flavor-chip.focus-scoop:focus-visible,
+.flavor-row.focus-scoop:focus-visible {
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flavor-dot,
+  .flavor-row,
+  .flavor-row::before,
+  .flavor-chip,
+  .flavor-chip__x {
+    transition: none;
+  }
+}
+
+/* In @layer base so an explicit text-color utility on an anchor (the chocolate
+ * CTA's text-primary-foreground, the muted back link's text-cocoa-soft) wins.
+ * Bare anchors with no color utility still inherit the strawberry-ink link ink. */
+@layer base {
+  a {
+    color: var(--strawberry-ink);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1.5px;
+    text-decoration-color: color-mix(in oklab, var(--strawberry-ink) 45%, transparent);
+  }
+  a:hover {
+    color: var(--cocoa);
+  }
 }
 
 /* Shared visible keyboard focus for hand-rolled interactive elements */

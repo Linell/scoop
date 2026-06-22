@@ -24,7 +24,7 @@ export type ParsedItem = {
 	title: string;
 	author: string | null;
 	content: string | null;
-	publishedAt: number; // epoch ms
+	publishedAt: number | null; // epoch ms, or null when the feed gives no usable date
 };
 
 const parser = new XMLParser({
@@ -65,11 +65,12 @@ export function stripHtml(html: string): string {
 		.trim();
 }
 
-function parseDate(value: unknown, fallback: number): number {
+/** Parse a feed date to epoch ms, or null when it's missing/unparseable. */
+function parseDate(value: unknown): number | null {
 	const raw = text(value);
-	if (!raw) return fallback;
+	if (!raw) return null;
 	const ms = Date.parse(raw);
-	return Number.isNaN(ms) ? fallback : ms;
+	return Number.isNaN(ms) ? null : ms;
 }
 
 /** Atom links can be an array of {@_rel, @_href}; pick the best "alternate". */
@@ -105,7 +106,6 @@ export async function fetchAndParseFeed(feedUrl: string): Promise<ParsedFeed> {
 	}
 
 	const xml = await res.text();
-	const now = Date.now();
 
 	let doc: Record<string, unknown>;
 	try {
@@ -118,17 +118,16 @@ export async function fetchAndParseFeed(feedUrl: string): Promise<ParsedFeed> {
 	const rdf = doc["rdf:RDF"] as Record<string, unknown> | undefined;
 	const feed = doc.feed as Record<string, unknown> | undefined;
 
-	if (rss?.channel)
-		return parseRss(rss.channel as Record<string, unknown>, now);
-	if (rdf) return parseRdf(rdf, now);
-	if (feed) return parseAtom(feed, now);
+	if (rss?.channel) return parseRss(rss.channel as Record<string, unknown>);
+	if (rdf) return parseRdf(rdf);
+	if (feed) return parseAtom(feed);
 
 	throw new FeedError("That doesn't look like an RSS or Atom feed.");
 }
 
 // --- internal parsing helpers below ---
 
-function parseRss(channel: Record<string, unknown>, now: number): ParsedFeed {
+function parseRss(channel: Record<string, unknown>): ParsedFeed {
 	const items = asArray(channel.item as Record<string, unknown>[]).map(
 		(item): ParsedItem => {
 			const link = text(item.link);
@@ -142,7 +141,7 @@ function parseRss(channel: Record<string, unknown>, now: number): ParsedFeed {
 				content:
 					stripHtml(text(item["content:encoded"]) || text(item.description)) ||
 					null,
-				publishedAt: parseDate(item.pubDate ?? item["dc:date"], now),
+				publishedAt: parseDate(item.pubDate ?? item["dc:date"]),
 			};
 		},
 	);
@@ -156,7 +155,7 @@ function parseRss(channel: Record<string, unknown>, now: number): ParsedFeed {
 }
 
 /** RDF (RSS 1.0) — items sit as siblings of channel, not nested inside it. */
-function parseRdf(rdf: Record<string, unknown>, now: number): ParsedFeed {
+function parseRdf(rdf: Record<string, unknown>): ParsedFeed {
 	const channel = (rdf.channel as Record<string, unknown>) ?? {};
 	const items = asArray(rdf.item as Record<string, unknown>[]).map(
 		(item): ParsedItem => {
@@ -167,7 +166,7 @@ function parseRdf(rdf: Record<string, unknown>, now: number): ParsedFeed {
 				title: stripHtml(text(item.title)) || "(untitled)",
 				author: stripHtml(text(item["dc:creator"])) || null,
 				content: stripHtml(text(item.description)) || null,
-				publishedAt: parseDate(item["dc:date"], now),
+				publishedAt: parseDate(item["dc:date"]),
 			};
 		},
 	);
@@ -180,7 +179,7 @@ function parseRdf(rdf: Record<string, unknown>, now: number): ParsedFeed {
 	};
 }
 
-function parseAtom(feed: Record<string, unknown>, now: number): ParsedFeed {
+function parseAtom(feed: Record<string, unknown>): ParsedFeed {
 	const entries = asArray(feed.entry as Record<string, unknown>[]).map(
 		(entry): ParsedItem => {
 			const url = atomLink(entry.link);
@@ -192,7 +191,7 @@ function parseAtom(feed: Record<string, unknown>, now: number): ParsedFeed {
 				title: stripHtml(text(entry.title)) || "(untitled)",
 				author: author ? stripHtml(text(author.name)) || null : null,
 				content: stripHtml(text(entry.summary) || text(entry.content)) || null,
-				publishedAt: parseDate(entry.published ?? entry.updated, now),
+				publishedAt: parseDate(entry.published ?? entry.updated),
 			};
 		},
 	);

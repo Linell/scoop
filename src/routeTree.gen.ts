@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ChatRouteImport } from './routes/chat'
+import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StoryStoryIdRouteImport } from './routes/story.$storyId'
 import { Route as ApiInngestRouteImport } from './routes/api/inngest'
@@ -17,6 +18,11 @@ import { Route as ApiInngestRouteImport } from './routes/api/inngest'
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -37,12 +43,14 @@ const ApiInngestRoute = ApiInngestRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/chat': typeof ChatRoute
   '/api/inngest': typeof ApiInngestRoute
   '/story/$storyId': typeof StoryStoryIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/chat': typeof ChatRoute
   '/api/inngest': typeof ApiInngestRoute
   '/story/$storyId': typeof StoryStoryIdRoute
@@ -50,20 +58,22 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/chat': typeof ChatRoute
   '/api/inngest': typeof ApiInngestRoute
   '/story/$storyId': typeof StoryStoryIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/chat' | '/api/inngest' | '/story/$storyId'
+  fullPaths: '/' | '/about' | '/chat' | '/api/inngest' | '/story/$storyId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/chat' | '/api/inngest' | '/story/$storyId'
-  id: '__root__' | '/' | '/chat' | '/api/inngest' | '/story/$storyId'
+  to: '/' | '/about' | '/chat' | '/api/inngest' | '/story/$storyId'
+  id: '__root__' | '/' | '/about' | '/chat' | '/api/inngest' | '/story/$storyId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AboutRoute: typeof AboutRoute
   ChatRoute: typeof ChatRoute
   ApiInngestRoute: typeof ApiInngestRoute
   StoryStoryIdRoute: typeof StoryStoryIdRoute
@@ -76,6 +86,13 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -104,6 +121,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AboutRoute: AboutRoute,
   ChatRoute: ChatRoute,
   ApiInngestRoute: ApiInngestRoute,
   StoryStoryIdRoute: StoryStoryIdRoute,

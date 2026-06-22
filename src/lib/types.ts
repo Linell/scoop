@@ -16,6 +16,19 @@ export type Story = {
 	title: string;
 	author: string | null;
 	content: string | null;
-	publishedAt: number;
+	publishedAt: number | null; // epoch ms; null when the feed gave no usable date
 	summary: string | null; // AI summary; null until the summarize job fills it in
+};
+
+/**
+ * A discovery-catalog entry: feed metadata sourced from the awesome-rss-feeds
+ * OPML files at build time (see scripts/build-catalog.ts). Purely for browse +
+ * search — adding one still routes through the live ingest path by `url`.
+ */
+export type CatalogFeed = {
+	title: string;
+	url: string;
+	siteUrl: string | null;
+	description: string | null;
+	category: string;
 };
