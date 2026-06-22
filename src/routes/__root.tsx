@@ -26,8 +26,7 @@ export const Route = createRootRoute({
 			},
 			{
 				name: "description",
-				content:
-					"Scoop reads your feeds, summarizes the stories, and points you back to the source.",
+				content: "Scoop is a pretty cool RSS feed reader, powered by Inngest.",
 			},
 		],
 		links: [

@@ -12,7 +12,6 @@ import {
 import { Input } from "#/components/ui/input";
 import { Skeleton } from "#/components/ui/skeleton";
 import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
-import { relativeTime } from "#/lib/time";
 import type { Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
 import { addFeed, getFeeds, getStories } from "#/server/feeds";
@@ -46,7 +45,7 @@ function Home() {
 		[feeds],
 	);
 
-	// Refetch feed records + stories whenever the subscription set changes.
+	// Re-hydrate feed records + stories whenever the subscription set changes.
 	useEffect(() => {
 		if (!hydrated) return;
 		if (ids.length === 0) {
@@ -83,25 +82,22 @@ function Home() {
 
 	const showSkeletons = !hydrated || (loading && stories.length === 0);
 
-	const today = new Date().toLocaleDateString("en-US", {
-		weekday: "long",
-		year: "numeric",
-		month: "long",
-		day: "numeric",
-	});
-
 	return (
 		<main className="mx-auto w-full max-w-6xl px-4 pb-24">
 			{/* Hero */}
 			<section className="melt-in py-10 sm:py-14">
-				<p className="kicker">The scoop for</p>
+				<p className="kicker">Your feeds, scooped</p>
 				<h1 className="scoop-title mt-3 text-[2rem] text-foreground sm:text-6xl">
-					{today}
+					Today, scooped.
 				</h1>
+				<p className="mt-4 max-w-[46ch] text-cocoa-soft">
+					Scoop reads your feeds and melts each story down to the good part —
+					then points you back to the source.
+				</p>
 
 				<Link
 					to="/chat"
-					className="focus-scoop mt-7 flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 no-underline shadow-sm transition-colors hover:border-strawberry"
+					className="focus-scoop mt-7 flex max-w-xl items-center gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 no-underline shadow-sm transition-colors hover:border-strawberry"
 				>
 					<Sparkles className="size-5 shrink-0 text-strawberry-ink" />
 					<span className="truncate text-cocoa-soft">
@@ -212,6 +208,18 @@ function Home() {
 	);
 }
 
+function relativeTime(ms: number): string {
+	const s = Math.round((Date.now() - ms) / 1000);
+	if (s < 60) return "just now";
+	const m = Math.round(s / 60);
+	if (m < 60) return `${m}m ago`;
+	const h = Math.round(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.round(h / 24);
+	if (d < 7) return `${d}d ago`;
+	return `${Math.round(d / 7)}w ago`;
+}
+
 function ScoopCard({
 	story,
 	feed,
@@ -224,9 +232,10 @@ function ScoopCard({
 	index: number;
 }) {
 	return (
-		<Link
-			to="/story/$storyId"
-			params={{ storyId: story.id }}
+		<a
+			href={story.url}
+			target="_blank"
+			rel="noreferrer"
 			className="whip-card whip-card-hover focus-scoop melt-in group flex h-full flex-col overflow-hidden text-left no-underline"
 			style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
 		>
@@ -267,7 +276,7 @@ function ScoopCard({
 					<ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
 				</div>
 			</div>
-		</Link>
+		</a>
 	);
 }
 
