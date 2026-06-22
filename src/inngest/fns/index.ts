@@ -1,4 +1,4 @@
-import { helloWorld } from "./hello-world";
+import { refreshFeed } from "./refresh-feed";
 import { refreshFeeds } from "./refresh-feeds";
 import { resummarizeStory } from "./resummarize-story";
 import { summarizeStory } from "./summarize-story";
@@ -8,8 +8,8 @@ import { summarizeStory } from "./summarize-story";
  * here so they get registered with Inngest when the app syncs.
  */
 export const functions = [
-	helloWorld,
 	refreshFeeds,
+	refreshFeed,
 	summarizeStory,
 	resummarizeStory,
 ];

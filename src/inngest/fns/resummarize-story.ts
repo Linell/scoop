@@ -1,6 +1,6 @@
 import { clearSummary, getStoryById } from "#/server/db";
 import { inngest } from "../client";
-import { STORY_CREATED, STORY_RESUMMARIZE } from "../events";
+import { storyCreated, storyResummarize } from "../events";
 
 /**
  * Regenerates one story's summary on demand (e.g. an admin hits "Resummarize"
@@ -13,18 +13,15 @@ import { STORY_CREATED, STORY_RESUMMARIZE } from "../events";
  * exactly as it would for a brand-new story.
  */
 export const resummarizeStory = inngest.createFunction(
-	{ id: "resummarize-story", triggers: [{ event: STORY_RESUMMARIZE }] },
+	{ id: "resummarize-story", triggers: [storyResummarize] },
 	async ({ event, step }) => {
-		const storyId = event.data.storyId as string;
+		const storyId = event.data.storyId;
 
 		const story = await step.run("load-story", () => getStoryById(storyId));
 		if (!story) return { storyId, skipped: "not-found" };
 
 		await step.run("clear-summary", () => clearSummary(storyId));
-		await step.sendEvent("requeue-summary", {
-			name: STORY_CREATED,
-			data: { storyId },
-		});
+		await step.sendEvent("requeue-summary", storyCreated.create({ storyId }));
 
 		return { storyId, resummarized: true };
 	},

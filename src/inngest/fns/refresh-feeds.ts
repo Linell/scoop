@@ -1,41 +1,24 @@
-import { getAllFeedUrls, ingestFeed } from "#/server/db";
+import { getAllFeedUrls } from "#/server/db";
 import { inngest } from "../client";
-import { STORY_CREATED } from "../events";
+import { feedRefreshRequested } from "../events";
 
 /**
- * Keeps the shared catalog fresh. Runs on a cron, fans out one step per feed so
- * a single slow/broken feed can't sink the batch, re-ingests each one, then
- * fans out a summary job per newly-ingested story.
+ * Keeps the shared catalog fresh. Runs on a cron and acts as a thin
+ * orchestrator: it lists every feed and emits one `scoop/feed.refresh.requested`
+ * event per url, then gets out of the way. The actual ingest happens in the
+ * `refresh-feed` function — one run per feed — mirroring the per-story fan-out,
+ * so a single slow/broken feed retries on its own and never sinks the batch.
  */
 export const refreshFeeds = inngest.createFunction(
 	{ id: "refresh-feeds", triggers: [{ cron: "*/30 * * * *" }] },
 	async ({ step }) => {
 		const urls = await step.run("list-feeds", () => getAllFeedUrls());
-
-		const results = await Promise.all(
-			urls.map((url) =>
-				step
-					.run(`refresh:${url}`, () => ingestFeed(url))
-					.then((r) => ({ url, ok: true, newStoryIds: r.newStoryIds }))
-					.catch(() => ({ url, ok: false, newStoryIds: [] as string[] })),
-			),
-		);
-
-		const newStoryIds = results.flatMap((r) => r.newStoryIds);
-		if (newStoryIds.length > 0) {
+		if (urls.length > 0) {
 			await step.sendEvent(
-				"queue-summaries",
-				newStoryIds.map((storyId) => ({
-					name: STORY_CREATED,
-					data: { storyId },
-				})),
+				"request-feed-refreshes",
+				urls.map((feedUrl) => feedRefreshRequested.create({ feedUrl })),
 			);
 		}
-
-		return {
-			feeds: urls.length,
-			refreshed: results.filter((r) => r.ok).length,
-			queued: newStoryIds.length,
-		};
+		return { feeds: urls.length };
 	},
 );

@@ -3,7 +3,16 @@
  * Kept free of the XML parser so importing them client-side stays cheap.
  */
 
-/** Stable, synchronous hash (FNV-1a → base36) used for feed/story dedup keys. */
+/**
+ * Stable, synchronous hash (FNV-1a → base36) used for feed/story dedup keys.
+ *
+ * This is a 32-bit hash, so the output space is ~4.3B values. By the birthday
+ * bound that means ~50% odds of at least one collision once the catalog holds
+ * roughly 65k keys (sqrt of 2^32). Because these hashes are the PRIMARY KEY for
+ * both feeds and stories, a collision makes INSERT OR IGNORE silently drop the
+ * losing row — acceptable at demo scale, but this is the ceiling to widen
+ * (e.g. a 64-bit hash) if the shared catalog ever grows large.
+ */
 export function hashId(input: string): string {
 	let hash = 0x811c9dc5;
 	for (let i = 0; i < input.length; i++) {

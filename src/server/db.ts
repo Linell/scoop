@@ -187,32 +187,77 @@ export async function getFeedsByIds(ids: string[]): Promise<Feed[]> {
 	return ids.map((id) => byId.get(id)).filter((f): f is Feed => f != null);
 }
 
+// The story-list query fetches only the columns a card actually renders. The
+// rest of a StoryRow is still typed, but the SQL never selects it — so list
+// rows carry a subset of StoryRow's fields, modelled here as a partial.
+type StoryCardRow = Pick<
+	StoryRow,
+	| "id"
+	| "feed_id"
+	| "url"
+	| "title"
+	| "author"
+	| "published_at"
+	| "created_at"
+	| "summary"
+>;
+
+/**
+ * Map a column-restricted card row to a full Story. The columns the list query
+ * deliberately skips (raw `content`) have no value here, so we fill them with
+ * null rather than reading an absent field. Detail views go through
+ * getStoryById, which selects everything and returns real content.
+ */
+const toCardStory = (r: StoryCardRow): Story => ({
+	id: r.id,
+	feedId: r.feed_id,
+	url: r.url,
+	title: r.title,
+	author: r.author,
+	content: null,
+	publishedAt: r.published_at,
+	summary: r.summary,
+});
+
 /** A row's effective sort key: its publish date, or ingest time if unknown. */
-const sortKey = (r: StoryRow): number => r.published_at ?? r.created_at;
+const sortKey = (r: StoryCardRow): number => r.published_at ?? r.created_at;
 
 /** Newest stories across the given feeds, most recent first. */
 export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 	if (ids.length === 0) return [];
-	const rows = await queryByIdChunks<StoryRow>(ids, async (slice) => {
+	const rows = await queryByIdChunks<StoryCardRow>(ids, async (slice) => {
 		const placeholders = slice.map(() => "?").join(", ");
 		// Limit PER FEED, not globally: rank each feed's stories by recency and
 		// keep its newest STORIES_PER_FEED. A single feed whose stories all sort
 		// to the top (e.g. one with no publish dates, stamped at ingest time)
 		// must not consume a shared LIMIT and starve the others out of the result.
+		//
+		// Select only the columns a card renders — id/feed_id/url/title/author/
+		// published_at/created_at/summary — never the raw `content`. Feed HTML is
+		// often kilobytes per row, and at up to STORIES_PER_FEED rows across every
+		// subscribed feed that's a lot of bandwidth for a column no card reads.
+		// The detail page (getStoryById) is the only reader of content.
+		//
+		// Note: the stories_feed_published index on (feed_id, published_at DESC)
+		// can't serve this ORDER BY COALESCE(published_at, created_at) DESC, so
+		// SQLite sorts each partition itself rather than walking the index. A
+		// deliberate tradeoff — fine at demo scale, where partitions are small.
 		const { results } = await db()
 			.prepare(
-				`SELECT * FROM (
-				   SELECT *, ROW_NUMBER() OVER (
-				     PARTITION BY feed_id
-				     ORDER BY COALESCE(published_at, created_at) DESC
-				   ) AS rn
+				`SELECT id, feed_id, url, title, author, published_at, created_at, summary
+				 FROM (
+				   SELECT id, feed_id, url, title, author, published_at, created_at, summary,
+				     ROW_NUMBER() OVER (
+				       PARTITION BY feed_id
+				       ORDER BY COALESCE(published_at, created_at) DESC
+				     ) AS rn
 				   FROM stories
 				   WHERE feed_id IN (${placeholders})
 				 )
 				 WHERE rn <= ?`,
 			)
 			.bind(...slice, STORIES_PER_FEED)
-			.all<StoryRow>();
+			.all<StoryCardRow>();
 		return results;
 	});
 
@@ -223,15 +268,15 @@ export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 	// MAX_PER_FEED from each feed in the main band and demoting the rest to a
 	// tail. Both bands stay in recency order, so we only ever push a feed's
 	// surplus down — never lift an older story up.
-	const main: StoryRow[] = [];
-	const tail: StoryRow[] = [];
+	const main: StoryCardRow[] = [];
+	const tail: StoryCardRow[] = [];
 	const seen = new Map<string, number>();
 	for (const row of rows) {
 		const count = seen.get(row.feed_id) ?? 0;
 		seen.set(row.feed_id, count + 1);
 		(count < MAX_PER_FEED ? main : tail).push(row);
 	}
-	return [...main, ...tail].map(toStory);
+	return [...main, ...tail].map(toCardStory);
 }
 
 /** A single story by id (used by the summarize job). */

@@ -2,7 +2,7 @@ import { getStoryById, saveSummary } from "#/server/db";
 import { enrichStory } from "#/server/extract";
 import { summarizeStory as generateSummary } from "#/server/summarize";
 import { inngest } from "../client";
-import { STORY_CREATED } from "../events";
+import { storyCreated } from "../events";
 
 /**
  * Summarizes a single story. One of these runs per new story (fanned out from
@@ -17,10 +17,15 @@ export const summarizeStory = inngest.createFunction(
 		// One model call per run; cap the fan-out so a big refresh can't stampede
 		// the API (and our rate limits).
 		concurrency: { limit: 5 },
-		triggers: [{ event: STORY_CREATED }],
+		// Singleton-skip collapses concurrent runs for the same story into one. The
+		// already-summarized DB check below is a check-then-act read: two runs for
+		// the same storyId could both observe a NULL summary and both pay for a
+		// model call. This guarantees at most one run per story is ever in flight.
+		singleton: { key: "event.data.storyId", mode: "skip" },
+		triggers: [storyCreated],
 	},
 	async ({ event, step }) => {
-		const storyId = event.data.storyId as string;
+		const storyId = event.data.storyId;
 
 		const story = await step.run("load-story", () => getStoryById(storyId));
 		if (!story) return { storyId, skipped: "not-found" };
