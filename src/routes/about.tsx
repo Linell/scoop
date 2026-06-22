@@ -25,21 +25,41 @@ function About() {
 
 				<div className="mt-6 space-y-4 text-cocoa-soft leading-relaxed">
 					<p>
-						Scoop is a tiny RSS reader demo churned on Cloudflare Workers + D1,
-						with Inngest running an AI pipeline that summarizes each fresh scoop
-						(and, soon, scores them for you).
+						Scoop is a RSS reader demo churned on Cloudflare Workers + D1, with{" "}
+						<a
+							href="https://www.inngest.com"
+							target="_blank"
+							rel="noreferrer"
+							className="font-semibold underline underline-offset-4"
+						>
+							Inngest
+						</a>{" "}
+						running an AI pipeline that summarizes each fresh scoop.
 					</p>
 					<p>
-						Flavors (feeds) and their scoops (stories) live in a shared catalog
-						in the database. The flavors you've subscribed to are kept right
-						here in your browser's localStorage — no sign-up, no sprinkles.
+						<span className="font-semibold">Flavors</span> (feeds) and their
+						<span className="font-semibold"> scoops</span> (stories) live in a
+						shared catalog in the database. The flavors you've subscribed to are
+						kept locally on your device - no account or sign up needed!
+					</p>
+					<p>
+						Made with extra sprinkles 🍦 by{" "}
+						<a
+							href="https://thelinell.com"
+							target="_blank"
+							rel="noreferrer"
+							className="font-semibold underline underline-offset-4"
+						>
+							Linell Bonnette
+						</a>
+						.
 					</p>
 				</div>
 
 				<div className="whip-card mt-8 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
 					<div className="min-w-0">
 						<p className="font-semibold text-foreground text-sm">
-							Wipe your flavors
+							Wipe your Flavors
 						</p>
 						<p className="text-cocoa-soft text-sm">
 							{hydrated
@@ -63,7 +83,7 @@ function About() {
 						) : (
 							<>
 								<Trash2 className="size-4" />
-								Reset local storage
+								Reset Local Storage
 							</>
 						)}
 					</Button>
