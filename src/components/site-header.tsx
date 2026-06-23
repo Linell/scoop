@@ -54,6 +54,9 @@ export function SiteHeader() {
 					>
 						Feed
 					</Link>
+					<Link to="/saved" className={navLink}>
+						Saved
+					</Link>
 					<Link to="/about" className={navLink}>
 						About
 					</Link>

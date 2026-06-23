@@ -6,12 +6,14 @@ import {
 	ChevronRight,
 	Loader2,
 	Plus,
+	Share2,
 	Sparkles,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { LeadImage } from "#/components/lead-image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ScoopCard } from "#/components/scoop-card";
 import { ScoopLogo } from "#/components/scoop-logo";
+import { ShareDialog } from "#/components/share-dialog";
 import { Button } from "#/components/ui/button";
 import {
 	CommandDialog,
@@ -22,14 +24,22 @@ import {
 } from "#/components/ui/command";
 import { Skeleton } from "#/components/ui/skeleton";
 import { groupByCategory, loadCatalog } from "#/lib/catalog";
+import { getClientId } from "#/lib/client-id";
 import { useFeedFilter } from "#/lib/feed-filter";
-import { type FeedView, useFeedView } from "#/lib/feed-view";
+import { useFeedView } from "#/lib/feed-view";
+import { useSaved } from "#/lib/saved";
 import { getBrowseSession } from "#/lib/session";
 import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { CatalogFeed, Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
-import { addFeed, getFeeds, getStories, recordStoryOpen } from "#/server/feeds";
+import {
+	addFeed,
+	createList,
+	getFeeds,
+	getStories,
+	recordStorySave,
+} from "#/server/feeds";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -44,11 +54,16 @@ function Home() {
 	// How cards render — text-only (default) or with lead images. Set on the
 	// About page and remembered; the feed itself stays free of chrome.
 	const { view } = useFeedView();
+	// One saved-store subscription for the whole grid — the cards are
+	// presentational and just take a `saved` flag plus a toggle handler, so
+	// saving one story no longer re-renders every card.
+	const { isSaved, toggle } = useSaved();
 
 	const [feeds, setFeeds] = useState<Feed[]>([]);
 	const [stories, setStories] = useState<Story[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [shareOpen, setShareOpen] = useState(false);
 	// Which flavors the feed is focused on (multi-select). An empty set means
 	// "show every flavor". Persisted to localStorage so focus survives reloads.
 	const {
@@ -130,6 +145,39 @@ function Home() {
 		},
 		[subscribe],
 	);
+
+	// Save handler shared by every card in the grid. On a transition INTO saved,
+	// fire the durable save signal best-effort; unsaving is purely local.
+	const onToggleSave = useCallback(
+		(storyId: string) => {
+			const wasSaved = isSaved(storyId);
+			toggle(storyId);
+			if (!wasSaved) {
+				recordStorySave({
+					data: {
+						storyId,
+						browseSession: getBrowseSession(),
+						clientId: getClientId(),
+					},
+				}).catch(() => {});
+			}
+		},
+		[isSaved, toggle],
+	);
+
+	// Publish the visitor's current flavors as a shared feeds list and resolve to
+	// its /l/<slug> link. The callback must stay stable so the ShareDialog effect
+	// doesn't re-fire on every subscribe/unsubscribe (or cross-tab storage event)
+	// and mint a fresh shared_lists row, orphaning the slug the user copied. Read
+	// the current ids through a ref and mint whatever is subscribed at click time.
+	const idsRef = useRef(ids);
+	idsRef.current = ids;
+	const createFlavorsLink = useCallback(async (): Promise<string> => {
+		const { slug } = await createList({
+			data: { kind: "feeds", ids: idsRef.current, clientId: getClientId() },
+		});
+		return `${window.location.origin}/l/${slug}`;
+	}, []);
 
 	const showSkeletons = !hydrated || (loading && stories.length === 0);
 
@@ -259,6 +307,18 @@ function Home() {
 						<Plus className="size-4" aria-hidden />
 						Add a flavor
 					</Button>
+
+					{/* Share is only meaningful once there's something to share. */}
+					{hydrated && subscriptions.length > 0 ? (
+						<Button
+							variant="ghost"
+							onClick={() => setShareOpen(true)}
+							className="w-full justify-start rounded-full text-cocoa-soft"
+						>
+							<Share2 className="size-4" aria-hidden />
+							Share my flavors
+						</Button>
+					) : null}
 				</aside>
 
 				{/* The feed */}
@@ -367,6 +427,8 @@ function Home() {
 										flavor={flavorById.get(story.feedId) ?? "var(--strawberry)"}
 										index={i}
 										view={view}
+										saved={isSaved(story.id)}
+										onToggleSave={() => onToggleSave(story.id)}
 									/>
 								))}
 							</div>
@@ -381,86 +443,15 @@ function Home() {
 				onAdd={addByUrl}
 				isSubscribed={isSubscribed}
 			/>
-		</main>
-	);
-}
 
-function ScoopCard({
-	story,
-	feed,
-	flavor,
-	index,
-	view,
-}: {
-	story: Story;
-	feed: Feed | undefined;
-	flavor: string;
-	index: number;
-	view: FeedView;
-}) {
-	// Photos view shows a lead image when this story has one. Cards without an
-	// image render the plain text layout, so a mixed feed reads as finished cards
-	// (the grid stretches them to equal height) rather than gaps.
-	const showImage = view === "photos" && Boolean(story.imageUrl);
-	return (
-		<Link
-			to="/story/$storyId"
-			params={{ storyId: story.id }}
-			// Fire-and-forget the click signal; never block the in-app navigation.
-			onClick={() => {
-				recordStoryOpen({
-					data: { storyId: story.id, browseSession: getBrowseSession() },
-				}).catch(() => {});
-			}}
-			className="whip-card whip-card-hover focus-scoop melt-in group flex h-full flex-col overflow-hidden text-left no-underline"
-			style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
-		>
-			<div
-				className="flavor-band h-2 w-full"
-				style={{ "--flavor": flavor } as React.CSSProperties}
+			<ShareDialog
+				open={shareOpen}
+				onOpenChange={setShareOpen}
+				title="Share your flavors"
+				description="Anyone with this link can add your flavors to their own scoop."
+				createLink={createFlavorsLink}
 			/>
-			{showImage ? <LeadImage src={story.imageUrl} /> : null}
-			<div className="flex flex-1 flex-col gap-3 p-5">
-				<div className="flex items-center gap-2">
-					<span
-						className="flavor-dot shrink-0"
-						style={{ "--flavor": flavor } as React.CSSProperties}
-					/>
-					<span className="truncate text-xs text-cocoa-soft">
-						{feed?.title ?? "Feed"}
-					</span>
-					<span className="ml-auto shrink-0 text-xs text-cocoa-soft">
-						{relativeTime(story.publishedAt)}
-					</span>
-				</div>
-
-				<h3 className="font-semibold text-base text-foreground leading-snug">
-					{story.title}
-				</h3>
-
-				{story.summary ? (
-					<p
-						className={`text-sm text-cocoa-soft ${
-							showImage ? "line-clamp-2" : "line-clamp-3"
-						}`}
-					>
-						{story.summary}
-					</p>
-				) : (
-					<p className="text-sm text-cocoa-soft italic">
-						Scoop is still churning this one…
-					</p>
-				)}
-
-				<div className="mt-auto flex items-center gap-1.5 pt-1 font-semibold text-sm text-strawberry-ink">
-					Read the full scoop
-					<ArrowRight
-						className="size-4 transition-transform group-hover:translate-x-0.5"
-						aria-hidden
-					/>
-				</div>
-			</div>
-		</Link>
+		</main>
 	);
 }
 

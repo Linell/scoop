@@ -1,15 +1,30 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Check, ExternalLink, Link2, RefreshCw } from "lucide-react";
+import {
+	ArrowLeft,
+	Bookmark,
+	BookmarkCheck,
+	Check,
+	ExternalLink,
+	Link2,
+	RefreshCw,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { LeadImage } from "#/components/lead-image";
 import { Button } from "#/components/ui/button";
 import { useIsAdmin } from "#/lib/admin";
+import { getClientId } from "#/lib/client-id";
+import { useSaved } from "#/lib/saved";
 import { getBrowseSession } from "#/lib/session";
 import { FLAVORS } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import { hashId, storyClickHref } from "#/lib/url";
 import type { StoryDetail } from "#/server/feeds";
-import { getStory, rateSummary, resummarizeStory } from "#/server/feeds";
+import {
+	getStory,
+	rateSummary,
+	recordStorySave,
+	resummarizeStory,
+} from "#/server/feeds";
 
 type Rating = "good" | "oversold" | "spoiled";
 
@@ -161,6 +176,53 @@ function CopyLinkButton() {
 	);
 }
 
+/**
+ * Bookmark this story to the local reading list. On a transition into saved it
+ * fires the durable save signal best-effort (saving is a strong positive
+ * engagement signal); unsaving is purely local. No anchor here, so it's a plain
+ * button — none of the nesting concerns the feed card has.
+ */
+function SaveButton({ storyId }: { storyId: string }) {
+	const { isSaved, toggle } = useSaved();
+	const saved = isSaved(storyId);
+
+	const onToggle = () => {
+		const wasSaved = saved;
+		toggle(storyId);
+		if (!wasSaved) {
+			recordStorySave({
+				data: {
+					storyId,
+					browseSession: getBrowseSession(),
+					clientId: getClientId(),
+				},
+			}).catch(() => {});
+		}
+	};
+
+	return (
+		<Button
+			variant="outline"
+			onClick={onToggle}
+			aria-pressed={saved}
+			className="rounded-full"
+			aria-label={saved ? "Saved" : "Save for later"}
+		>
+			{saved ? (
+				<>
+					<BookmarkCheck className="size-4 text-strawberry-ink" aria-hidden />
+					Saved
+				</>
+			) : (
+				<>
+					<Bookmark className="size-4" aria-hidden />
+					Save for later
+				</>
+			)}
+		</Button>
+	);
+}
+
 function StoryView({ detail }: { detail: StoryDetail }) {
 	const { story, feed } = detail;
 	const isAdmin = useIsAdmin();
@@ -282,6 +344,8 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 							Read the original
 							<ExternalLink className="size-4" aria-hidden />
 						</a>
+
+						<SaveButton storyId={story.id} />
 
 						<CopyLinkButton />
 

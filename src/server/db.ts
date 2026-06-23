@@ -300,6 +300,27 @@ export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 	return [...main, ...tail].map(toCardStory);
 }
 
+/** Look up stories by id, preserving caller order; missing ids are dropped.
+ * Mirrors getStoriesByFeedIds' lean card columns (skips the raw `content`),
+ * but selects by story id directly — the reader for shared story lists. */
+export async function getStoriesByIds(ids: string[]): Promise<Story[]> {
+	if (ids.length === 0) return [];
+	const rows = await queryByIdChunks<StoryCardRow>(ids, async (slice) => {
+		const placeholders = slice.map(() => "?").join(", ");
+		const { results } = await db()
+			.prepare(
+				`SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary, rating
+				 FROM stories WHERE id IN (${placeholders})`,
+			)
+			.bind(...slice)
+			.all<StoryCardRow>();
+		return results;
+	});
+
+	const byId = new Map(rows.map((r) => [r.id, toCardStory(r)]));
+	return ids.map((id) => byId.get(id)).filter((s): s is Story => s != null);
+}
+
 /** A single story by id (used by the summarize job). */
 export async function getStoryById(id: string): Promise<Story | null> {
 	const row = await db()
@@ -376,4 +397,113 @@ export async function getAllFeedUrls(): Promise<string[]> {
 		.prepare(`SELECT feed_url FROM feeds`)
 		.all<{ feed_url: string }>();
 	return results.map((r) => r.feed_url);
+}
+
+// --- Shared lists ----------------------------------------------------------
+// A generic "publish an ordered set of ids under a short slug" primitive. The
+// feeds path is wired up now; the stories path (with a JSON folder structure)
+// reuses the same tables and is filled in by a later stage.
+
+// Url-safe, unambiguous-ish base62. ~10 chars over 62 symbols is ~59 bits of
+// slug space — plenty to avoid collisions at demo scale without a uniqueness
+// retry loop.
+const SLUG_ALPHABET =
+	"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const SLUG_LENGTH = 10;
+
+/** A short, url-safe slug from the Workers Web Crypto global (no Node crypto). */
+function makeSlug(): string {
+	const bytes = new Uint8Array(SLUG_LENGTH);
+	crypto.getRandomValues(bytes);
+	let slug = "";
+	for (const b of bytes) slug += SLUG_ALPHABET[b % SLUG_ALPHABET.length];
+	return slug;
+}
+
+export type SharedListKind = "feeds" | "stories";
+
+export type SharedList = {
+	slug: string;
+	kind: SharedListKind;
+	title: string | null;
+	structure: string | null;
+	itemIds: string[];
+};
+
+type SharedListRow = {
+	slug: string;
+	kind: string;
+	title: string | null;
+	structure: string | null;
+};
+
+/**
+ * Publish a list: insert the parent row plus its ordered items, returning the
+ * generated slug. `structure` is stored verbatim (a JSON string for nested
+ * story lists, or null for the flat feeds kind). created_at == updated_at on
+ * first publish; the list is immutable for now.
+ */
+export async function createSharedList({
+	kind,
+	title,
+	ownerClientId,
+	itemIds,
+	structure,
+}: {
+	kind: SharedListKind;
+	title: string | null;
+	ownerClientId: string | null;
+	itemIds: string[];
+	structure: string | null;
+}): Promise<string> {
+	const slug = makeSlug();
+	const now = Date.now();
+
+	const statements = [
+		db()
+			.prepare(
+				`INSERT INTO shared_lists (slug, kind, title, owner_client_id, structure, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.bind(slug, kind, title, ownerClientId, structure, now, now),
+	];
+
+	const itemStmt = db().prepare(
+		`INSERT INTO shared_list_items (slug, item_id, position) VALUES (?, ?, ?)`,
+	);
+	// (slug, item_id) is the PK and the batch is one transaction, so a repeated
+	// id would throw and create no list at all — dedupe, keeping first-seen order.
+	const uniqueIds = [...new Set(itemIds)];
+	uniqueIds.forEach((itemId, i) => {
+		statements.push(itemStmt.bind(slug, itemId, i));
+	});
+
+	await db().batch(statements);
+	return slug;
+}
+
+/** A published list by slug — its metadata plus item ids in position order. */
+export async function getSharedList(slug: string): Promise<SharedList | null> {
+	const row = await db()
+		.prepare(
+			`SELECT slug, kind, title, structure FROM shared_lists WHERE slug = ?`,
+		)
+		.bind(slug)
+		.first<SharedListRow>();
+	if (!row) return null;
+
+	const { results } = await db()
+		.prepare(
+			`SELECT item_id FROM shared_list_items WHERE slug = ? ORDER BY position`,
+		)
+		.bind(slug)
+		.all<{ item_id: string }>();
+
+	return {
+		slug: row.slug,
+		kind: row.kind as SharedListKind,
+		title: row.title,
+		structure: row.structure,
+		itemIds: results.map((r) => r.item_id),
+	};
 }

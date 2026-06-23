@@ -62,6 +62,15 @@ export const summaryRated = eventType("scoop/summary.rated", {
 	}),
 });
 
+/**
+ * A reader saved a story to their reading list. Handled by `score-save` — saving
+ * is a strong positive engagement signal (a deliberate "I want to come back to
+ * this"), so the reading list pulls double duty as a scoring signal here.
+ */
+export const storySaved = eventType("scoop/story.saved", {
+	schema: z.object({ storyId: z.string() }),
+});
+
 /** Best-effort: enqueue a summary job for each new story id. */
 export async function queueStorySummaries(storyIds: string[]): Promise<void> {
 	if (storyIds.length === 0) return;
@@ -120,5 +129,29 @@ export async function recordSummaryRating(
 		...(browseSession && {
 			meta: { sessions: { browse_session: browseSession } },
 		}),
+	});
+}
+
+/**
+ * Record a save to the reading list — a strong positive engagement signal. Both
+ * ids ride along as dashboard sessions when present: a `browseSession` so the
+ * save joins the rest of this tab's browsing burst, and a `clientId` so it
+ * stitches to the returning visitor over time. `meta` is omitted when neither
+ * is present.
+ */
+export async function recordStorySave(
+	storyId: string,
+	{
+		browseSession,
+		clientId,
+	}: { browseSession?: string; clientId?: string } = {},
+): Promise<void> {
+	const sessions = {
+		...(browseSession && { browse_session: browseSession }),
+		...(clientId && { client_id: clientId }),
+	};
+	await inngest.send({
+		...storySaved.create({ storyId }),
+		...(Object.keys(sessions).length > 0 && { meta: { sessions } }),
 	});
 }

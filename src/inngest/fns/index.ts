@@ -4,6 +4,7 @@ import { refreshFeeds } from "./refresh-feeds";
 import { resummarizeStory } from "./resummarize-story";
 import { scoreClick } from "./score-click";
 import { scoreRating } from "./score-rating";
+import { scoreSave } from "./score-save";
 import { summarizeStory } from "./summarize-story";
 
 /**
@@ -18,4 +19,5 @@ export const functions = [
 	judgeSummaryScorer,
 	scoreClick,
 	scoreRating,
+	scoreSave,
 ];

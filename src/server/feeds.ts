@@ -1,5 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
+	// Aliased so the server fn below can keep the clean public `recordStorySave`
+	// name — the emitter and the server fn would otherwise clash.
+	recordStorySave as emitStorySave,
 	queueStorySummaries,
 	recordStoryClick,
 	recordSummaryRating,
@@ -8,10 +11,14 @@ import {
 import { FeedError } from "#/lib/rss";
 import type { Feed, Story } from "#/lib/types";
 import {
+	createSharedList,
 	getFeedsByIds,
+	getSharedList,
 	getStoriesByFeedIds,
+	getStoriesByIds,
 	getStoryById,
 	ingestFeed,
+	type SharedListKind,
 } from "./db";
 
 /**
@@ -60,6 +67,33 @@ function validateStoryOpen(input: unknown): {
 			? data.browseSession.trim()
 			: undefined;
 	return { storyId, browseSession };
+}
+
+/**
+ * A save to the reading list, optionally tagged with the tab's browse session
+ * and the visitor's durable client id (both ride along as scoring sessions).
+ */
+function validateStorySave(input: unknown): {
+	storyId: string;
+	browseSession?: string;
+	clientId?: string;
+} {
+	const data = input as {
+		storyId?: unknown;
+		browseSession?: unknown;
+		clientId?: unknown;
+	};
+	const storyId = typeof data?.storyId === "string" ? data.storyId.trim() : "";
+	if (storyId === "") throw new Error("A story id is required.");
+	const browseSession =
+		typeof data?.browseSession === "string" && data.browseSession.trim() !== ""
+			? data.browseSession.trim()
+			: undefined;
+	const clientId =
+		typeof data?.clientId === "string" && data.clientId.trim() !== ""
+			? data.clientId.trim()
+			: undefined;
+	return { storyId, browseSession, clientId };
 }
 
 const RATINGS = ["good", "oversold", "spoiled"] as const;
@@ -154,6 +188,29 @@ export const recordStoryOpen = createServerFn({ method: "POST" })
 	});
 
 /**
+ * Record a save to the reading list as a durable engagement signal. Saving is a
+ * strong positive signal (a deliberate "come back to this"), so it fires the
+ * same kind of best-effort durable Inngest event the click/rating paths do.
+ * Best-effort: a tracking hiccup must never block the reader's save.
+ */
+export const recordStorySave = createServerFn({ method: "POST" })
+	.validator(validateStorySave)
+	.handler(async ({ data }): Promise<{ ok: boolean }> => {
+		const story = await getStoryById(data.storyId);
+		if (!story) return { ok: false };
+		await emitStorySave(story.id, {
+			browseSession: data.browseSession,
+			clientId: data.clientId,
+		}).catch(() => {});
+		return { ok: true };
+	});
+
+/** Hydrate the saved story cards a visitor's reading list points at. */
+export const getSavedStories = createServerFn({ method: "POST" })
+	.validator(validateIds)
+	.handler(async ({ data: ids }): Promise<Story[]> => getStoriesByIds(ids));
+
+/**
  * Record a reader's rating of a story's summary. Fires the durable signal that
  * `score-rating` turns into a per-variant `satisfaction` score and persists on
  * the story row. Best-effort: a tracking hiccup must never block the reader.
@@ -178,4 +235,116 @@ export const resummarizeStory = createServerFn({ method: "POST" })
 	.handler(async ({ data: id }): Promise<{ ok: boolean }> => {
 		await requestResummarize(id).catch(() => {});
 		return { ok: true };
+	});
+
+// --- Shared lists ----------------------------------------------------------
+
+// Caps on the publishable payload, so a tampered client can't store an unbounded
+// title or folder tree. The id count rides the same MAX_FEED_IDS bound as the
+// rest of the feed endpoints.
+const MAX_LIST_TITLE = 80;
+const MAX_LIST_STRUCTURE = 20000;
+const LIST_KINDS = ["feeds", "stories"] as const;
+
+type CreateListInput = {
+	kind: SharedListKind;
+	title: string | null;
+	ids: string[];
+	clientId: string | null;
+	structure: string | null;
+};
+
+function validateCreateList(input: unknown): CreateListInput {
+	const data = input as {
+		kind?: unknown;
+		title?: unknown;
+		ids?: unknown;
+		clientId?: unknown;
+		structure?: unknown;
+	};
+	if (!LIST_KINDS.includes(data?.kind as SharedListKind)) {
+		throw new Error("Expected a list kind of feeds or stories.");
+	}
+	const ids = validateIds(data?.ids);
+	if (ids.length === 0) throw new Error("A list needs at least one item.");
+
+	const title =
+		typeof data?.title === "string" && data.title.trim() !== ""
+			? data.title.trim().slice(0, MAX_LIST_TITLE)
+			: null;
+
+	const clientId =
+		typeof data?.clientId === "string" && data.clientId.trim() !== ""
+			? data.clientId.trim()
+			: null;
+
+	let structure: string | null = null;
+	if (data?.structure != null) {
+		if (typeof data.structure !== "string") {
+			throw new Error("List structure must be a JSON string.");
+		}
+		if (data.structure.length > MAX_LIST_STRUCTURE) {
+			throw new Error("List structure is too large.");
+		}
+		structure = data.structure;
+	}
+
+	return { kind: data.kind as SharedListKind, title, ids, clientId, structure };
+}
+
+/**
+ * The metadata + hydrated items a /l/<slug> preview renders. A discriminated
+ * union on `kind`, so narrowing on `list.kind` also narrows `items` — no casts
+ * needed at the call site.
+ */
+export type ListResult =
+	| {
+			kind: "feeds";
+			title: string | null;
+			structure: string | null;
+			items: Feed[];
+	  }
+	| {
+			kind: "stories";
+			title: string | null;
+			structure: string | null;
+			items: Story[];
+	  };
+
+/** Publish the visitor's current selection as a shared list; returns its slug. */
+export const createList = createServerFn({ method: "POST" })
+	.validator(validateCreateList)
+	.handler(async ({ data }): Promise<{ slug: string }> => {
+		const slug = await createSharedList({
+			kind: data.kind,
+			title: data.title,
+			ownerClientId: data.clientId,
+			itemIds: data.ids,
+			structure: data.structure,
+		});
+		return { slug };
+	});
+
+/** Hydrate a shared list for its preview page. Null if the slug is unknown. */
+export const getList = createServerFn({ method: "POST" })
+	.validator(validateId)
+	.handler(async ({ data: slug }): Promise<ListResult | null> => {
+		const list = await getSharedList(slug);
+		if (!list) return null;
+		if (list.kind === "stories") {
+			const items = await getStoriesByIds(list.itemIds);
+			return {
+				kind: "stories",
+				title: list.title,
+				structure: list.structure,
+				items,
+			};
+		}
+		const items = await getFeedsByIds(list.itemIds);
+		return {
+			kind: "feeds",
+			title: list.title,
+			structure: list.structure,
+			items,
+		};
 	});

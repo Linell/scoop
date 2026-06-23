@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { createLocalStore } from "./local-store";
 
 /**
  * The feed view mode — how the home page renders story cards. "text" is the
@@ -11,47 +12,48 @@ export type FeedView = "text" | "photos";
 
 const STORAGE_KEY = "scoop.view.v1";
 
-function read(): FeedView {
-	if (typeof window === "undefined") return "text";
-	try {
-		return window.localStorage.getItem(STORAGE_KEY) === "photos"
-			? "photos"
-			: "text";
-	} catch {
-		return "text";
-	}
-}
+const store = createLocalStore<FeedView>({
+	key: STORAGE_KEY,
+	fallback: "text",
+	validate: (parsed) => (parsed === "photos" ? "photos" : "text"),
+});
 
-function write(view: FeedView) {
+/**
+ * One-time legacy migration. The view used to be stored as a RAW string
+ * (localStorage.setItem(key, "photos")), but createLocalStore reads via
+ * JSON.parse — so a legacy bare value throws and silently falls back to "text",
+ * losing the preference. If we find an unquoted "photos"/"text", rewrite it as
+ * JSON so the store can read it. SSR-safe and crash-safe (private mode).
+ */
+function migrateLegacyView() {
+	if (typeof window === "undefined") return;
 	try {
-		window.localStorage.setItem(STORAGE_KEY, view);
+		const raw = window.localStorage.getItem(STORAGE_KEY);
+		if (raw === "photos" || raw === "text") {
+			window.localStorage.setItem(STORAGE_KEY, JSON.stringify(raw));
+		}
 	} catch {
 		// Private mode / quota — nothing actionable, just don't crash.
 	}
 }
 
 export function useFeedView() {
+	// Rewrite any legacy bare value before the store reads it (and re-reads on a
+	// cross-tab storage event). Runs once on the client, before hydration below.
+	useEffect(() => {
+		migrateLegacyView();
+	}, []);
+
 	// Start on the default so server and first client render agree, then hydrate
 	// from localStorage in an effect — same dance as useSubscriptions/useFeedFilter.
-	const [view, setViewState] = useState<FeedView>("text");
-	const [hydrated, setHydrated] = useState(false);
+	const { value: view, setValue, hydrated } = store.useStore();
 
-	useEffect(() => {
-		setViewState(read());
-		setHydrated(true);
-
-		// Keep tabs in sync if the user has Scoop open twice.
-		const onStorage = (e: StorageEvent) => {
-			if (e.key === STORAGE_KEY) setViewState(read());
-		};
-		window.addEventListener("storage", onStorage);
-		return () => window.removeEventListener("storage", onStorage);
-	}, []);
-
-	const setView = useCallback((next: FeedView) => {
-		setViewState(next);
-		write(next);
-	}, []);
+	const setView = useCallback(
+		(next: FeedView) => {
+			setValue(next);
+		},
+		[setValue],
+	);
 
 	return { view, hydrated, setView };
 }
