@@ -46,6 +46,11 @@ export const storyClicked = eventType("scoop/story.clicked", {
 		feedId: z.string(),
 		url: z.string(),
 		from: z.string(),
+		// What the reader actually did: `open` = viewed the in-app show page (a
+		// weak signal), `through` = clicked out to the original article (the strong
+		// teaser signal). `from` records the surface and can't distinguish these
+		// (an outbound link can also carry from:"feed"), so the action is explicit.
+		action: z.enum(["open", "through"]),
 	}),
 });
 
@@ -89,6 +94,7 @@ type StoryClick = {
 	feedId: string;
 	url: string;
 	from: string;
+	action: "open" | "through";
 };
 
 /**

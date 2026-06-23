@@ -22,7 +22,13 @@ async function trackAndRedirect(
 
 	// Best-effort: a tracking hiccup must never cost the reader their click.
 	await recordStoryClick(
-		{ storyId: story.id, feedId: story.feedId, url: story.url, from },
+		{
+			storyId: story.id,
+			feedId: story.feedId,
+			url: story.url,
+			from,
+			action: "through",
+		},
 		{ conversationId: cid, browseSession: bs },
 	).catch(() => {});
 

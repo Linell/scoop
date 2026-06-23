@@ -113,6 +113,27 @@ export const summarizeStory = inngest.createFunction(
 			value: notRefusal(summary),
 		});
 
+		// Seed engagement counters at 0 for THIS variant on this run, so each
+		// experiment's avg-reactions-per-run spans every summarized story, not just
+		// the ones that later drew a reaction. The `score-click`/`score-save` jobs
+		// overwrite these (run-scoped, same name) with the running total when a
+		// reaction lands, attributing back to this run via its id.
+		await inngest.score.experiment({
+			name: "opens",
+			value: 0,
+			experiment: experimentRef,
+		});
+		await inngest.score.experiment({
+			name: "clickthroughs",
+			value: 0,
+			experiment: experimentRef,
+		});
+		await inngest.score.experiment({
+			name: "saves",
+			value: 0,
+			experiment: experimentRef,
+		});
+
 		// Defer the LLM-as-judge: it runs as its own retryable scorer run rather
 		// than inline here, so a slow or flaky model call never blocks the summary.
 		// We hand it the served variant via `experiment`, which surfaces on the

@@ -50,6 +50,10 @@ type StoryRow = {
 	summarize_run_id: string | null;
 	rating: "good" | "oversold" | "spoiled" | null;
 	rated_at: number | null;
+	click_count: number;
+	save_count: number;
+	open_count: number;
+	clickthrough_count: number;
 };
 
 const toFeed = (r: FeedRow): Feed => ({
@@ -372,15 +376,44 @@ export async function saveRating(
 }
 
 /**
- * Stamp the time a reader last clicked through to a story. Anchors the click
- * onto the story within the reader's browse/conversation session; the
- * `score-click` job is its only writer.
+ * Stamp the time a reader last clicked a story and bump the counter for that
+ * kind of click — `open` (viewed the in-app show page) or `through` (clicked out
+ * to the original article) — returning the new total for that kind. Anchors the
+ * click within the reader's browse/conversation session; the `score-click` job
+ * is its only writer and emits the returned count as a per-variant experiment
+ * score. The `+ 1` runs in a single UPDATE so concurrent clicks each count once.
  */
-export async function recordClick(id: string, at: number): Promise<void> {
-	await db()
-		.prepare(`UPDATE stories SET last_clicked_at = ? WHERE id = ?`)
+export async function recordClick(
+	id: string,
+	at: number,
+	kind: "open" | "through",
+): Promise<number> {
+	// `col` is a fixed literal chosen from `kind`, never user input.
+	const col = kind === "open" ? "open_count" : "clickthrough_count";
+	const row = await db()
+		.prepare(
+			`UPDATE stories SET last_clicked_at = ?, ${col} = ${col} + 1
+			 WHERE id = ? RETURNING ${col} AS n`,
+		)
 		.bind(at, id)
-		.run();
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
+/**
+ * Bump a story's save counter and return the new total. The `score-save` job is
+ * its only writer and emits the count as a per-variant experiment score; the
+ * `+ 1` runs in a single UPDATE so concurrent saves each count exactly once.
+ */
+export async function recordSave(id: string): Promise<number> {
+	const row = await db()
+		.prepare(
+			`UPDATE stories SET save_count = save_count + 1
+			 WHERE id = ? RETURNING save_count`,
+		)
+		.bind(id)
+		.first<{ save_count: number }>();
+	return row?.save_count ?? 0;
 }
 
 /**

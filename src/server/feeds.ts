@@ -181,6 +181,7 @@ export const recordStoryOpen = createServerFn({ method: "POST" })
 				feedId: story.feedId,
 				url: story.url,
 				from: "feed",
+				action: "open",
 			},
 			{ browseSession: data.browseSession },
 		).catch(() => {});
