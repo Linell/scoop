@@ -66,13 +66,16 @@
 }
 
 .dark {
-  --cream: #1c1418;
-  --whip: #241a20;
-  --cocoa: #fbe9ef;
-  --cocoa-soft: #c9aeb8;
-  --strawberry: #ff9cb9;
-  --strawberry-deep: #ff7ea3;
-  --strawberry-ink: #ff9cb9;
+  /* "Ice cream at night": a cool deep plum/blueberry base instead of warm
+   * maroon. Warm hues at low lightness read as mud/dried-blood; cool hues at
+   * low lightness read as taro/blueberry — which keeps the pastel identity. */
+  --cream: #2c1f16;
+  --whip: #3a2a1e;
+  --cocoa: #f6ece2;
+  --cocoa-soft: #cdbcab;
+  --strawberry: #f3a6bd;
+  --strawberry-deep: #f08aa8;
+  --strawberry-ink: #f3acc1;
   --mint: #8fe0cb;
   --mint-deep: #6fd3ba;
   --blueberry: #b6c0f7;
@@ -80,33 +83,33 @@
   --mango: #ffc394;
   --taro: #d8c2f7;
 
-  --background: #1c1418;
-  --foreground: #fbe9ef;
-  --card: #241a20;
-  --card-foreground: #fbe9ef;
-  --popover: #241a20;
-  --popover-foreground: #fbe9ef;
-  --primary: #ff9cb9;
-  --primary-foreground: #2a1820;
-  --secondary: #3a2730;
-  --secondary-foreground: #fbe9ef;
-  --muted: #2e2128;
-  --muted-foreground: #c9aeb8;
-  --accent: #243630;
-  --accent-foreground: #9fe3d2;
+  --background: #2c1f16;
+  --foreground: #f6ece2;
+  --card: #3a2a1e;
+  --card-foreground: #f6ece2;
+  --popover: #423022;
+  --popover-foreground: #f6ece2;
+  --primary: #f3a6bd;
+  --primary-foreground: #2a1c12;
+  --secondary: #4d3927;
+  --secondary-foreground: #f6ece2;
+  --muted: #3a2a1e;
+  --muted-foreground: #cdbcab;
+  --accent: #43301e;
+  --accent-foreground: #ffc394;
   --destructive: #ff6b70;
-  --destructive-foreground: #2a1820;
-  --border: #3a2730;
-  --input: #3a2730;
-  --ring: #ff9cb9;
-  --sidebar: #211720;
-  --sidebar-foreground: #fbe9ef;
-  --sidebar-primary: #ff9cb9;
-  --sidebar-primary-foreground: #2a1820;
-  --sidebar-accent: #3a2730;
-  --sidebar-accent-foreground: #fbe9ef;
-  --sidebar-border: #3a2730;
-  --sidebar-ring: #ff9cb9;
+  --destructive-foreground: #2a1c12;
+  --border: #574027;
+  --input: #574027;
+  --ring: #f3a6bd;
+  --sidebar: #34251a;
+  --sidebar-foreground: #f6ece2;
+  --sidebar-primary: #f3a6bd;
+  --sidebar-primary-foreground: #2a1c12;
+  --sidebar-accent: #4d3927;
+  --sidebar-accent-foreground: #f6ece2;
+  --sidebar-border: #574027;
+  --sidebar-ring: #f3a6bd;
 }
 
 @theme inline {
@@ -199,6 +202,21 @@ body,
       background-attachment: fixed;
     }
   }
+  /* Dark mode: lead the wash with cool flavors (taro/blueberry/mint) at low
+   * opacity so the top reads as a faint pastel aurora, not a strawberry-over-
+   * maroon bruise. */
+  .dark body {
+    background-image:
+      radial-gradient(900px 520px at 6% -8%, color-mix(in oklab, var(--strawberry) 26%, transparent), transparent 62%),
+      radial-gradient(820px 520px at 98% -6%, color-mix(in oklab, var(--mango) 22%, transparent), transparent 64%),
+      radial-gradient(760px 540px at 50% 116%, color-mix(in oklab, var(--mint) 16%, transparent), transparent 66%);
+  }
+}
+
+/* Dark mode: let the primary CTA glow softly instead of relying on raw
+ * saturation, which vibrates against the deep base. */
+.dark .bg-primary {
+  box-shadow: 0 0 24px -8px color-mix(in oklab, var(--primary) 55%, transparent);
 }
 
 /* Monospace tracking: tighten display, loosen tiny labels */
@@ -243,6 +261,22 @@ body,
     0 1px 0 rgba(255, 255, 255, 0.8) inset,
     0 22px 40px -20px rgba(74, 54, 64, 0.45),
     0 6px 16px -8px rgba(74, 54, 64, 0.22);
+}
+
+/* On a dark ground the warm-brown drop shadow disappears and the bright inset
+ * highlight is wrong. Elevation reads through darker shadows + a faint
+ * top-edge catch-light instead. */
+.dark .whip-card {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 14px 30px -18px rgba(0, 0, 0, 0.6),
+    0 4px 12px -8px rgba(0, 0, 0, 0.45);
+}
+.dark .whip-card-hover:hover {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 22px 40px -20px rgba(0, 0, 0, 0.65),
+    0 6px 16px -8px rgba(0, 0, 0, 0.5);
 }
 
 /* The colored "scoop" sitting on top of a card — set --flavor per card */

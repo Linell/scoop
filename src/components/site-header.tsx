@@ -60,6 +60,9 @@ export function SiteHeader() {
 					<Link to="/about" className={navLink}>
 						About
 					</Link>
+					<Link to="/settings" className={navLink}>
+						Settings
+					</Link>
 				</nav>
 
 				{/* Flagship action gets the prime right-hand slot as a filled CTA. */}

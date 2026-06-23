@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as AboutRouteImport } from './routes/about'
@@ -18,6 +19,11 @@ import { Route as RStoryIdRouteImport } from './routes/r.$storyId'
 import { Route as LSlugRouteImport } from './routes/l.$slug'
 import { Route as ApiInngestRouteImport } from './routes/api/inngest'
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SavedRoute = SavedRouteImport.update({
   id: '/saved',
   path: '/saved',
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRoute
   '/chat': typeof ChatRoute
   '/saved': typeof SavedRoute
+  '/settings': typeof SettingsRoute
   '/api/inngest': typeof ApiInngestRoute
   '/l/$slug': typeof LSlugRoute
   '/r/$storyId': typeof RStoryIdRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/chat': typeof ChatRoute
   '/saved': typeof SavedRoute
+  '/settings': typeof SettingsRoute
   '/api/inngest': typeof ApiInngestRoute
   '/l/$slug': typeof LSlugRoute
   '/r/$storyId': typeof RStoryIdRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/chat': typeof ChatRoute
   '/saved': typeof SavedRoute
+  '/settings': typeof SettingsRoute
   '/api/inngest': typeof ApiInngestRoute
   '/l/$slug': typeof LSlugRoute
   '/r/$storyId': typeof RStoryIdRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/chat'
     | '/saved'
+    | '/settings'
     | '/api/inngest'
     | '/l/$slug'
     | '/r/$storyId'
@@ -107,6 +117,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/chat'
     | '/saved'
+    | '/settings'
     | '/api/inngest'
     | '/l/$slug'
     | '/r/$storyId'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/chat'
     | '/saved'
+    | '/settings'
     | '/api/inngest'
     | '/l/$slug'
     | '/r/$storyId'
@@ -128,6 +140,7 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   ChatRoute: typeof ChatRoute
   SavedRoute: typeof SavedRoute
+  SettingsRoute: typeof SettingsRoute
   ApiInngestRoute: typeof ApiInngestRoute
   LSlugRoute: typeof LSlugRoute
   RStoryIdRoute: typeof RStoryIdRoute
@@ -136,6 +149,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/saved': {
       id: '/saved'
       path: '/saved'
@@ -200,6 +220,7 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   ChatRoute: ChatRoute,
   SavedRoute: SavedRoute,
+  SettingsRoute: SettingsRoute,
   ApiInngestRoute: ApiInngestRoute,
   LSlugRoute: LSlugRoute,
   RStoryIdRoute: RStoryIdRoute,
