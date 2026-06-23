@@ -21,6 +21,7 @@ const story = (over: Partial<Story> = {}): Story => ({
 	summary: null,
 	servedVariant: null,
 	experimentName: null,
+	summarizeRunId: null,
 	rating: null,
 	...over,
 });

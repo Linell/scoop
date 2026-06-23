@@ -21,6 +21,7 @@ export type Story = {
 	summary: string | null; // AI summary; null until the summarize job fills it in
 	servedVariant: string | null; // experiment variant that produced the summary; null pre-experiment
 	experimentName: string | null; // experiment the variant belongs to; null pre-experiment
+	summarizeRunId: string | null; // Inngest run that produced the summary; lets later scorers attribute to its variant. null pre-experiment
 	rating: "good" | "oversold" | "spoiled" | null; // a reader's rating of the summary; null until rated
 };
 

@@ -43,7 +43,7 @@ export const summarizeStory = inngest.createFunction(
 		singleton: { key: "event.data.storyId", mode: "skip" },
 		triggers: [storyCreated, storyResummarize],
 	},
-	async ({ event, step, group, defer }) => {
+	async ({ event, step, group, defer, runId }) => {
 		const storyId = event.data.storyId;
 
 		const story = await step.run("load-story", () => getStoryById(storyId));
@@ -87,6 +87,9 @@ export const summarizeStory = inngest.createFunction(
 			saveSummary(storyId, summary, {
 				name: experimentRef.experimentName,
 				variant: experimentRef.variant,
+				// Persist this run id so the (parentless, event-driven) rating handler
+				// can attribute its score back to this run's served variant.
+				runId,
 			}),
 		);
 

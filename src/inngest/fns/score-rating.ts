@@ -31,8 +31,14 @@ export const scoreRating = inngest.createFunction(
 		const story = await getStoryById(storyId);
 
 		// No story, or a summary written before the experiment existed: there's no
-		// variant to credit, so the rating can't be attributed. No-op cleanly.
-		if (!story?.servedVariant || !story.experimentName) {
+		// variant to credit, so the rating can't be attributed. We also need the
+		// originating summarize run id — this is a parentless, event-driven run, so
+		// without it there's no way to attribute back to the variant's function.
+		if (
+			!story?.servedVariant ||
+			!story.experimentName ||
+			!story.summarizeRunId
+		) {
 			return { storyId, rating, skipped: "no-variant" };
 		}
 
@@ -43,6 +49,10 @@ export const scoreRating = inngest.createFunction(
 				experimentName: story.experimentName,
 				variant: story.servedVariant,
 			},
+			// Target the summarize run that served the variant. Experiments are keyed
+			// by the function that declared their variants, so without this the score
+			// would land on a separate `score-rating` experiment record instead.
+			runId: story.summarizeRunId,
 		});
 
 		return { storyId, rating, variant: story.servedVariant };

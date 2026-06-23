@@ -42,22 +42,33 @@ export const judgeSummaryScorer = createScorer(
 		const experiment = parents[0]?.experiment;
 		if (!experiment) return null;
 
+		// Target the parent (summarize-story) run, not this scorer's own run.
+		// Experiments are keyed by the function that declared their variants, so a
+		// score emitted under THIS function lands on a separate experiment record
+		// with no variants. Passing the parent run id re-attributes the score back
+		// to the run that served the variant (Inngest derives function_id from the
+		// target run), so it shows up under the real `summary-strategy` experiment.
+		const runId = parents[0]?.runId;
+
 		// Emit all three axes attributed to the served variant. (spoiler: HIGH is
 		// bad — we keep the judge's own semantics, the experiment view interprets.)
 		await inngest.score.experiment({
 			name: "faithfulness",
 			value: judged.faithfulness,
 			experiment,
+			runId,
 		});
 		await inngest.score.experiment({
 			name: "teaser",
 			value: judged.teaser,
 			experiment,
+			runId,
 		});
 		await inngest.score.experiment({
 			name: "spoiler",
 			value: judged.spoiler,
 			experiment,
+			runId,
 		});
 
 		// All scoring is done via the explicit experiment writes above.

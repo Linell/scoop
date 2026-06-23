@@ -47,6 +47,7 @@ type StoryRow = {
 	summary: string | null;
 	served_variant: string | null;
 	experiment_name: string | null;
+	summarize_run_id: string | null;
 	rating: "good" | "oversold" | "spoiled" | null;
 	rated_at: number | null;
 };
@@ -72,6 +73,7 @@ const toStory = (r: StoryRow): Story => ({
 	summary: r.summary,
 	servedVariant: r.served_variant,
 	experimentName: r.experiment_name,
+	summarizeRunId: r.summarize_run_id,
 	rating: r.rating,
 });
 
@@ -235,6 +237,7 @@ const toCardStory = (r: StoryCardRow): Story => ({
 	// view, getStoryById, reads them), so a card Story carries null here.
 	servedVariant: null,
 	experimentName: null,
+	summarizeRunId: null,
 	// The card does select `rating` so it can reflect a reader's prior rating;
 	// pre-rating rows carry null.
 	rating: r.rating,
@@ -332,22 +335,23 @@ export async function getStoryById(id: string): Promise<Story | null> {
 
 /**
  * Store the AI summary for a story, along with which experiment variant served
- * it. The variant + experiment name let us trace a card's summary back to the
- * teaser strategy that produced it; the judge scores are attributed to the same
- * variant on the Inngest side.
+ * it and the run that produced it. The variant + experiment name let us trace a
+ * card's summary back to the teaser strategy that produced it; the run id lets
+ * the parentless rating handler attribute its score to that run's variant on the
+ * Inngest side (the judge does the same via its deferred parent run).
  */
 export async function saveSummary(
 	id: string,
 	summary: string,
-	experiment: { name: string; variant: string },
+	experiment: { name: string; variant: string; runId: string },
 ): Promise<void> {
 	await db()
 		.prepare(
 			`UPDATE stories
-			 SET summary = ?, served_variant = ?, experiment_name = ?
+			 SET summary = ?, served_variant = ?, experiment_name = ?, summarize_run_id = ?
 			 WHERE id = ?`,
 		)
-		.bind(summary, experiment.variant, experiment.name, id)
+		.bind(summary, experiment.variant, experiment.name, experiment.runId, id)
 		.run();
 }
 
