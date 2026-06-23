@@ -32,7 +32,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "fast-xml-parser": "^5.9.3",
-    "inngest": "^4.4.1-pr-1521.15",
+    "inngest": "^4.8.0",
     "lucide-react": "^0.577.0",
     "radix-ui": "^1.6.0",
     "react": "^19.2.0",
