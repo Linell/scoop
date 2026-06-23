@@ -21,7 +21,16 @@ export const Route = createFileRoute("/l/$slug")({
 	loader: ({ params }) => getList({ data: params.slug }),
 	head: ({ loaderData }) => {
 		const title = loaderData?.title ?? "Shared flavors";
-		return { meta: [{ title: `${title} — Scoop` }] };
+		const full = `${title} — Scoop`;
+		// Override the social-preview title so a shared link unfurls with the
+		// list's own name; the image/description fall through to the root defaults.
+		return {
+			meta: [
+				{ title: full },
+				{ property: "og:title", content: full },
+				{ name: "twitter:title", content: full },
+			],
+		};
 	},
 	component: ListPage,
 });

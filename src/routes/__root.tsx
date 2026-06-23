@@ -5,6 +5,9 @@ import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { SiteHeader } from "#/components/site-header";
 import appCss from "../styles.css?url";
 
+/** Canonical origin, used to build absolute URLs for social-share meta tags. */
+const SITE_URL = "https://scoop.thelinell.com";
+
 const favicon =
 	"data:image/svg+xml," +
 	encodeURIComponent(
@@ -28,6 +31,28 @@ export const Route = createRootRoute({
 				name: "description",
 				content: "Scoop is a pretty cool RSS feed reader, powered by Inngest.",
 			},
+			// Social sharing (iMessage / Slack / Twitter previews). Absolute URLs
+			// are required — link unfurlers don't resolve relative paths. Child
+			// routes can override og:title / og:description for richer previews.
+			{ property: "og:title", content: "Scoop" },
+			{
+				property: "og:description",
+				content: "A pretty cool RSS reader, served one flavor at a time.",
+			},
+			{ property: "og:type", content: "website" },
+			{ property: "og:url", content: SITE_URL },
+			{ property: "og:image", content: `${SITE_URL}/og.png` },
+			{ property: "og:image:width", content: "2400" },
+			{ property: "og:image:height", content: "1260" },
+			{ property: "og:image:alt", content: "Scoop — a pretty cool RSS reader" },
+			{ property: "og:site_name", content: "Scoop" },
+			{ name: "twitter:card", content: "summary_large_image" },
+			{ name: "twitter:title", content: "Scoop" },
+			{
+				name: "twitter:description",
+				content: "A pretty cool RSS reader, served one flavor at a time.",
+			},
+			{ name: "twitter:image", content: `${SITE_URL}/og.png` },
 		],
 		links: [
 			{
