@@ -48,8 +48,8 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       inngest:
-        specifier: ^4.8.0
-        version: 4.8.0(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(react@19.2.7)(typescript@6.0.3)(zod@4.4.3)
+        specifier: ^4.10.0
+        version: 4.10.0(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(react@19.2.7)(typescript@6.0.3)(zod@4.4.3)
       lucide-react:
         specifier: ^0.577.0
         version: 0.577.0(react@19.2.7)
@@ -3146,8 +3146,8 @@ packages:
   inline-style-parser@0.2.7:
     resolution: {integrity: sha512-Nb2ctOyNR8DqQoR0OwRG95uNWIC0C1lCgf5Naz5H6Ji72KZ8OcFZLz2P5sNgwlyoJ8Yif11oMuYs5pBQa86csA==}
 
-  inngest@4.8.0:
-    resolution: {integrity: sha512-TVfSbH/VLy4PFHbkIQFn/QwZB6pRLZzxX8G1gpKL2gLRcEovBNboTemnmaHdhrC+fsaxqcIh/DQXrwgZSPvnWw==}
+  inngest@4.10.0:
+    resolution: {integrity: sha512-qipd2hah8ky5KAVDCnW7Q0elgt3rnftbbjI5zFFx0qv5OgQOFJk95Zmb/wWQxNdDH5uscsYFXG+hDa7RsQtlAQ==}
     engines: {node: '>=20'}
     peerDependencies:
       '@sveltejs/kit': '>=1.27.3'
@@ -7385,7 +7385,7 @@ snapshots:
 
   inline-style-parser@0.2.7: {}
 
-  inngest@4.8.0(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(react@19.2.7)(typescript@6.0.3)(zod@4.4.3):
+  inngest@4.10.0(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(react@19.2.7)(typescript@6.0.3)(zod@4.4.3):
     dependencies:
       '@bufbuild/protobuf': 2.12.1
       '@inngest/ai': 0.1.7
