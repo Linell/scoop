@@ -5,11 +5,14 @@ import {
 	Check,
 	ChevronRight,
 	Loader2,
+	MoreHorizontal,
+	Pencil,
 	Plus,
 	Share2,
 	Sparkles,
 	X,
 } from "lucide-react";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScoopCard } from "#/components/scoop-card";
 import { ScoopLogo } from "#/components/scoop-logo";
@@ -29,7 +32,11 @@ import { useFeedFilter } from "#/lib/feed-filter";
 import { useFeedView } from "#/lib/feed-view";
 import { useSaved } from "#/lib/saved";
 import { getBrowseSession } from "#/lib/session";
-import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
+import {
+	FLAVORS,
+	type Subscription,
+	useSubscriptions,
+} from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { CatalogFeed, Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
@@ -49,8 +56,14 @@ const SUGGESTED: { title: string; url: string }[] = [
 ];
 
 function Home() {
-	const { subscriptions, hydrated, subscribe, unsubscribe, isSubscribed } =
-		useSubscriptions();
+	const {
+		subscriptions,
+		hydrated,
+		subscribe,
+		unsubscribe,
+		restore,
+		isSubscribed,
+	} = useSubscriptions();
 	// How cards render — text-only (default) or with lead images. Set on the
 	// About page and remembered; the feed itself stays free of chrome.
 	const { view } = useFeedView();
@@ -165,6 +178,42 @@ function Home() {
 		[isSaved, toggle],
 	);
 
+	// Unfollowing is soft-destructive, so it never happens silently: we stash the
+	// removed subscription (and where it sat) and surface an "Undo" toast for a
+	// few seconds. Restoring puts the exact flavor back in place, so an accidental
+	// unfollow costs one tap to reverse.
+	const [undo, setUndo] = useState<{
+		sub: Subscription;
+		index: number;
+		title: string;
+	} | null>(null);
+
+	const unfollow = useCallback(
+		(id: string) => {
+			const removed = unsubscribe(id);
+			if (!removed) return;
+			const title = feedById.get(id)?.title ?? "that flavor";
+			setUndo({ ...removed, title });
+		},
+		[unsubscribe, feedById],
+	);
+
+	const undoUnfollow = useCallback(() => {
+		setUndo((u) => {
+			if (u) restore(u.sub, u.index);
+			return null;
+		});
+	}, [restore]);
+
+	// One effect owns the auto-dismiss: a fresh unfollow swaps in a new `undo`
+	// object, which re-runs this and restarts the 6s timer; the cleanup also
+	// covers an Undo click (state → null) and unmount mid-countdown.
+	useEffect(() => {
+		if (!undo) return;
+		const timer = setTimeout(() => setUndo(null), 6000);
+		return () => clearTimeout(timer);
+	}, [undo]);
+
 	// Publish the visitor's current flavors as a shared feeds list and resolve to
 	// its /l/<slug> link. The callback must stay stable so the ShareDialog effect
 	// doesn't re-fire on every subscribe/unsubscribe (or cross-tab storage event)
@@ -216,8 +265,9 @@ function Home() {
 			</section>
 
 			<div className="grid gap-8 lg:grid-cols-[240px_1fr]">
-				{/* Your flavors */}
-				<aside className="lg:sticky lg:top-20 lg:self-start">
+				{/* Your flavors — full sidebar on desktop; on small screens this is
+				    hidden in favor of the horizontal FlavorStrip inside the feed. */}
+				<aside className="hidden lg:sticky lg:top-20 lg:block lg:self-start">
 					<div className="flex items-center justify-between">
 						<h2 className="kicker">Your flavors</h2>
 						<span className="text-xs text-cocoa-soft">
@@ -257,7 +307,7 @@ function Home() {
 								const feed = feedById.get(sub.id);
 								const active = selected.has(sub.id);
 								return (
-									<li key={sub.id} className="group/flavor">
+									<li key={sub.id}>
 										<div
 											data-active={active}
 											style={{ "--flavor": sub.flavor } as React.CSSProperties}
@@ -282,16 +332,10 @@ function Home() {
 													{feed?.title ?? "Loading…"}
 												</span>
 											</button>
-											<button
-												type="button"
-												onClick={() => unsubscribe(sub.id)}
-												aria-label={`Remove ${feed?.title ?? "feed"}`}
-												className={`focus-scoop shrink-0 rounded-full p-1 text-cocoa-soft transition-opacity hover:text-strawberry-ink group-hover/flavor:opacity-100 ${
-													active ? "opacity-100" : "opacity-0"
-												}`}
-											>
-												<X className="size-3.5" aria-hidden />
-											</button>
+											<UnfollowControl
+												title={feed?.title ?? "this flavor"}
+												onConfirm={() => unfollow(sub.id)}
+											/>
 										</div>
 									</li>
 								);
@@ -321,8 +365,22 @@ function Home() {
 					) : null}
 				</aside>
 
-				{/* The feed */}
-				<section>
+				{/* The feed. min-w-0 lets this grid track shrink below the flavor
+				    strip's intrinsic width, so the strip clips + scrolls instead of
+				    stretching the whole page wide on mobile. */}
+				<section className="min-w-0">
+					{hydrated && subscriptions.length > 0 ? (
+						<FlavorStrip
+							subscriptions={subscriptions}
+							feedById={feedById}
+							selected={selected}
+							onToggle={toggleFilter}
+							onClear={clearFilter}
+							onUnfollow={unfollow}
+							onAdd={() => setDialogOpen(true)}
+							onShare={() => setShareOpen(true)}
+						/>
+					) : null}
 					<div className="mb-4 flex items-baseline justify-between gap-3">
 						<div className="flex min-w-0 items-baseline gap-2">
 							<h2 className="kicker">Fresh scoops</h2>
@@ -451,7 +509,217 @@ function Home() {
 				description="Anyone with this link can add your flavors to their own scoop."
 				createLink={createFlavorsLink}
 			/>
+
+			{/* Undo toast for an unfollow — the safety net that keeps unfollowing
+			    from being a silent, irreversible tap. */}
+			<div
+				aria-live="polite"
+				className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4"
+			>
+				{undo ? (
+					<div className="melt-in pointer-events-auto flex items-center gap-3 rounded-full border border-border bg-card px-4 py-2.5 text-sm text-foreground shadow-lg">
+						<span className="truncate">
+							Unfollowed <span className="font-semibold">{undo.title}</span>
+						</span>
+						<button
+							type="button"
+							onClick={undoUnfollow}
+							className="focus-scoop shrink-0 rounded-full px-2 py-0.5 font-semibold text-strawberry-ink hover:underline"
+						>
+							Undo
+						</button>
+					</div>
+				) : null}
+			</div>
 		</main>
+	);
+}
+
+/**
+ * The desktop row's trailing control. Filtering is the whole-row action a user
+ * clicks constantly, so unfollow — destructive and rare — must NOT sit on that
+ * same click path. We keep a quiet, always-visible "⋯" in the trailing slot
+ * (discoverable for pointer + keyboard, no hover-gating) that opens a small
+ * popover with an inline "Unfollow {title}?" confirm. Two deliberate steps on a
+ * separate target, so the cursor's filtering motion can never delete a feed.
+ * Focus opens on the dismiss button, so a stray Enter/Space cancels.
+ */
+function UnfollowControl({
+	title,
+	onConfirm,
+}: {
+	title: string;
+	onConfirm: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	return (
+		<PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
+			<PopoverPrimitive.Trigger asChild>
+				<button
+					type="button"
+					aria-label={`More actions for ${title}`}
+					className="focus-scoop flex size-9 shrink-0 items-center justify-center rounded-full text-cocoa-soft opacity-60 transition hover:bg-cocoa/5 hover:text-foreground hover:opacity-100 focus-visible:opacity-100 data-[state=open]:bg-cocoa/5 data-[state=open]:opacity-100"
+				>
+					<MoreHorizontal className="size-4" aria-hidden />
+				</button>
+			</PopoverPrimitive.Trigger>
+			<PopoverPrimitive.Portal>
+				<PopoverPrimitive.Content
+					side="bottom"
+					align="end"
+					sideOffset={6}
+					className="melt-in z-50 flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-sm text-foreground shadow-lg"
+				>
+					<span className="whitespace-nowrap">
+						Unfollow <span className="font-semibold">{title}</span>?
+					</span>
+					{/* Dismiss first so it takes the popover's initial focus. */}
+					<button
+						type="button"
+						onClick={() => setOpen(false)}
+						aria-label="Keep following"
+						className="focus-scoop flex size-7 shrink-0 items-center justify-center rounded-full text-cocoa-soft transition hover:bg-cocoa/5 hover:text-foreground"
+					>
+						<X className="size-4" aria-hidden />
+					</button>
+					<button
+						type="button"
+						onClick={() => {
+							setOpen(false);
+							onConfirm();
+						}}
+						aria-label={`Unfollow ${title}`}
+						className="focus-scoop flex size-7 shrink-0 items-center justify-center rounded-full bg-strawberry/15 text-strawberry-ink transition hover:bg-strawberry/25"
+					>
+						<Check className="size-4" aria-hidden />
+					</button>
+				</PopoverPrimitive.Content>
+			</PopoverPrimitive.Portal>
+		</PopoverPrimitive.Root>
+	);
+}
+
+/**
+ * The small-screen counterpart to the flavor sidebar: a single horizontally
+ * scrolling row of flavor "scoops" instead of a tall list that buries the feed.
+ *
+ * Filtering and unfollowing are kept deliberately separate so a filter tap can
+ * never quietly unfollow a feed (the bug the sidebar's hover-only X had on
+ * touch). Tapping a chip filters; an explicit Edit toggle flips the row into a
+ * manage mode where the whole chip becomes "unfollow this flavor".
+ */
+function FlavorStrip({
+	subscriptions,
+	feedById,
+	selected,
+	onToggle,
+	onClear,
+	onUnfollow,
+	onAdd,
+	onShare,
+}: {
+	subscriptions: Subscription[];
+	feedById: Map<string, Feed>;
+	selected: Set<string>;
+	onToggle: (id: string) => void;
+	onClear: () => void;
+	onUnfollow: (id: string) => void;
+	onAdd: () => void;
+	onShare: () => void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const showingAll = selected.size === 0;
+
+	return (
+		<div className="mb-6 lg:hidden">
+			<div className="mb-2 flex items-center justify-between">
+				<h2 className="kicker">
+					Your flavors{" "}
+					<span className="font-normal text-cocoa-soft">
+						{subscriptions.length}
+					</span>
+				</h2>
+				<button
+					type="button"
+					onClick={() => setEditing((e) => !e)}
+					aria-pressed={editing}
+					className="focus-scoop inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs text-cocoa-soft transition-colors hover:text-foreground"
+				>
+					{editing ? (
+						<>
+							<Check className="size-3.5" aria-hidden />
+							Done
+						</>
+					) : (
+						<>
+							<Pencil className="size-3.5" aria-hidden />
+							Edit
+						</>
+					)}
+				</button>
+			</div>
+
+			<div className="flavor-strip -mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+				{!editing ? (
+					<button
+						type="button"
+						onClick={onClear}
+						aria-pressed={showingAll}
+						data-active={showingAll}
+						style={{ "--flavor": "var(--strawberry)" } as React.CSSProperties}
+						className="flavor-pill shrink-0"
+					>
+						<Sparkles className="size-3.5 shrink-0" aria-hidden />
+						All
+					</button>
+				) : null}
+
+				{/* One chip; edit mode only swaps the handler, label, the trailing
+				    X, and the destructive tint — filtering vs unfollowing. */}
+				{subscriptions.map((sub) => {
+					const title = feedById.get(sub.id)?.title ?? "Loading…";
+					const active = selected.has(sub.id);
+					return (
+						<button
+							key={sub.id}
+							type="button"
+							onClick={() => (editing ? onUnfollow(sub.id) : onToggle(sub.id))}
+							aria-pressed={editing ? undefined : active}
+							data-active={editing ? undefined : active}
+							aria-label={editing ? `Unfollow ${title}` : `Filter by ${title}`}
+							style={{ "--flavor": sub.flavor } as React.CSSProperties}
+							className={`flavor-pill shrink-0${editing ? " flavor-pill--remove" : ""}`}
+						>
+							<span className="flavor-dot shrink-0" />
+							<span className="max-w-[10rem] truncate">{title}</span>
+							{editing ? <X className="size-3.5 shrink-0" aria-hidden /> : null}
+						</button>
+					);
+				})}
+
+				{!editing ? (
+					<>
+						<button
+							type="button"
+							onClick={onAdd}
+							className="flavor-pill flavor-pill--ghost shrink-0"
+						>
+							<Plus className="size-3.5 shrink-0" aria-hidden />
+							Add
+						</button>
+						<button
+							type="button"
+							onClick={onShare}
+							aria-label="Share my flavors"
+							className="flavor-pill flavor-pill--ghost shrink-0"
+						>
+							<Share2 className="size-3.5 shrink-0" aria-hidden />
+							Share
+						</button>
+					</>
+				) : null}
+			</div>
+		</div>
 	);
 }
 

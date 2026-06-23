@@ -52,9 +52,32 @@ export function useSubscriptions() {
 		[setSubs],
 	);
 
+	// Remove a feed and hand back what was removed (the object + where it sat),
+	// so the caller can offer a one-tap undo without re-deriving that itself.
+	// Returns null when the id wasn't subscribed.
 	const unsubscribe = useCallback(
-		(id: string) => {
+		(id: string): { sub: Subscription; index: number } | null => {
+			const index = subs.findIndex((s) => s.id === id);
+			if (index === -1) return null;
+			const sub = subs[index];
 			setSubs((prev) => prev.filter((s) => s.id !== id));
+			return { sub, index };
+		},
+		[subs, setSubs],
+	);
+
+	// Put an exact subscription back at its original spot — the undo half of an
+	// unfollow. Restoring the original object (not re-running subscribe) keeps
+	// the feed's flavor color and sidebar position stable, so an undo looks like
+	// the unfollow simply never happened. Guarded so a double-undo is a no-op.
+	const restore = useCallback(
+		(sub: Subscription, index: number) => {
+			setSubs((prev) => {
+				if (prev.some((s) => s.id === sub.id)) return prev;
+				const next = [...prev];
+				next.splice(Math.min(index, next.length), 0, sub);
+				return next;
+			});
 		},
 		[setSubs],
 	);
@@ -74,6 +97,7 @@ export function useSubscriptions() {
 		hydrated,
 		subscribe,
 		unsubscribe,
+		restore,
 		isSubscribed,
 		clear,
 	};

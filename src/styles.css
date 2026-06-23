@@ -349,12 +349,66 @@ body,
   margin-left: -0.3rem;
 }
 
+/*
+ * The small-screen flavor row: a horizontally scrolling strip of tappable
+ * "scoops". Each .flavor-pill is a filter toggle (or, in the strip's edit mode,
+ * an unfollow button) — inactive pills read as quiet outlines, active ones fill
+ * with their own flavor so a selected filter looks scooped.
+ */
+.flavor-strip {
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.flavor-strip::-webkit-scrollbar {
+  display: none;
+}
+.flavor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  transition: background-color 160ms ease, border-color 160ms ease,
+    color 160ms ease;
+}
+.flavor-pill .flavor-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+.flavor-pill[data-active='true'] {
+  background: color-mix(in oklab, var(--flavor, var(--strawberry)) 22%, var(--card));
+  border-color: color-mix(in oklab, var(--flavor, var(--strawberry)) 50%, var(--border));
+}
+/* Ghost pills (Add / Share) sit one notch quieter than a flavor pill. */
+.flavor-pill--ghost {
+  font-weight: 500;
+  color: var(--cocoa-soft);
+  background: transparent;
+}
+/* In edit mode the whole pill is an unfollow button: a soft strawberry wash so
+ * it clearly reads as "tapping this removes it", distinct from a filter tap. */
+.flavor-pill--remove {
+  color: var(--strawberry-ink);
+  background: color-mix(in oklab, var(--strawberry) 12%, var(--card));
+  border-color: color-mix(in oklab, var(--strawberry) 40%, var(--border));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .flavor-dot,
   .flavor-row,
   .flavor-row::before,
   .flavor-chip,
-  .flavor-chip__x {
+  .flavor-chip__x,
+  .flavor-pill {
     transition: none;
   }
 }
