@@ -49,6 +49,19 @@ export const storyClicked = eventType("scoop/story.clicked", {
 	}),
 });
 
+/**
+ * A human rated a story's summary after reading it. Handled by `score-rating`,
+ * which maps the rating to a `satisfaction` score and attributes it to the
+ * teaser-strategy variant that produced the summary — a human signal alongside
+ * the automated judge and clickthrough scores.
+ */
+export const summaryRated = eventType("scoop/summary.rated", {
+	schema: z.object({
+		storyId: z.string(),
+		rating: z.enum(["good", "oversold", "spoiled"]),
+	}),
+});
+
 /** Best-effort: enqueue a summary job for each new story id. */
 export async function queueStorySummaries(storyIds: string[]): Promise<void> {
 	if (storyIds.length === 0) return;
@@ -70,17 +83,42 @@ type StoryClick = {
 };
 
 /**
- * Record an outbound click. A `conversationId` is attached as a session so the
- * click and the chat turn that produced it share one session in the dashboard.
+ * Record an outbound click. Both ids ride along as dashboard sessions: a
+ * `browseSession` so the click joins the rest of this tab's browsing burst, and
+ * a `conversationId` (when the click came from chat) so it also shares a session
+ * with the chat turn that drove it. `meta` is omitted when neither is present.
  */
 export async function recordStoryClick(
 	click: StoryClick,
-	conversationId?: string,
+	{
+		conversationId,
+		browseSession,
+	}: { conversationId?: string; browseSession?: string } = {},
 ): Promise<void> {
+	const sessions = {
+		...(browseSession && { browse_session: browseSession }),
+		...(conversationId && { conversation_id: conversationId }),
+	};
 	await inngest.send({
 		...storyClicked.create(click),
-		...(conversationId && {
-			meta: { sessions: { conversation_id: conversationId } },
+		...(Object.keys(sessions).length > 0 && { meta: { sessions } }),
+	});
+}
+
+/**
+ * Record a human's rating of a story's summary, scored per-variant downstream.
+ * A `browseSession` rides along as a session so the rating joins the rest of
+ * this tab's browsing burst in the dashboard.
+ */
+export async function recordSummaryRating(
+	storyId: string,
+	rating: "good" | "oversold" | "spoiled",
+	browseSession?: string,
+): Promise<void> {
+	await inngest.send({
+		...summaryRated.create({ storyId, rating }),
+		...(browseSession && {
+			meta: { sessions: { browse_session: browseSession } },
 		}),
 	});
 }

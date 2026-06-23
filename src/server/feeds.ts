@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import {
 	queueStorySummaries,
 	recordStoryClick,
+	recordSummaryRating,
 	requestResummarize,
 } from "#/inngest/events";
 import { FeedError } from "#/lib/rss";
@@ -44,6 +45,46 @@ function validateId(input: unknown): string {
 		throw new Error("A story id is required.");
 	}
 	return input.trim();
+}
+
+/** A feed-card open, optionally tagged with the tab's browse session. */
+function validateStoryOpen(input: unknown): {
+	storyId: string;
+	browseSession?: string;
+} {
+	const data = input as { storyId?: unknown; browseSession?: unknown };
+	const storyId = typeof data?.storyId === "string" ? data.storyId.trim() : "";
+	if (storyId === "") throw new Error("A story id is required.");
+	const browseSession =
+		typeof data?.browseSession === "string" && data.browseSession.trim() !== ""
+			? data.browseSession.trim()
+			: undefined;
+	return { storyId, browseSession };
+}
+
+const RATINGS = ["good", "oversold", "spoiled"] as const;
+type Rating = (typeof RATINGS)[number];
+
+function validateRating(input: unknown): {
+	storyId: string;
+	rating: Rating;
+	browseSession?: string;
+} {
+	const data = input as {
+		storyId?: unknown;
+		rating?: unknown;
+		browseSession?: unknown;
+	};
+	const storyId = typeof data?.storyId === "string" ? data.storyId.trim() : "";
+	if (storyId === "") throw new Error("A story id is required.");
+	if (!RATINGS.includes(data?.rating as Rating)) {
+		throw new Error("Expected a rating of good, oversold, or spoiled.");
+	}
+	const browseSession =
+		typeof data?.browseSession === "string" && data.browseSession.trim() !== ""
+			? data.browseSession.trim()
+			: undefined;
+	return { storyId, rating: data.rating as Rating, browseSession };
 }
 
 /** A story plus the feed it belongs to — the payload for a story detail page. */
@@ -96,16 +137,35 @@ export const getStory = createServerFn({ method: "POST" })
  * Best-effort: a tracking hiccup must never block the reader's navigation.
  */
 export const recordStoryOpen = createServerFn({ method: "POST" })
-	.validator(validateId)
-	.handler(async ({ data: id }): Promise<{ ok: boolean }> => {
-		const story = await getStoryById(id);
+	.validator(validateStoryOpen)
+	.handler(async ({ data }): Promise<{ ok: boolean }> => {
+		const story = await getStoryById(data.storyId);
 		if (!story) return { ok: false };
-		await recordStoryClick({
-			storyId: story.id,
-			feedId: story.feedId,
-			url: story.url,
-			from: "feed",
-		}).catch(() => {});
+		await recordStoryClick(
+			{
+				storyId: story.id,
+				feedId: story.feedId,
+				url: story.url,
+				from: "feed",
+			},
+			{ browseSession: data.browseSession },
+		).catch(() => {});
+		return { ok: true };
+	});
+
+/**
+ * Record a reader's rating of a story's summary. Fires the durable signal that
+ * `score-rating` turns into a per-variant `satisfaction` score and persists on
+ * the story row. Best-effort: a tracking hiccup must never block the reader.
+ */
+export const rateSummary = createServerFn({ method: "POST" })
+	.validator(validateRating)
+	.handler(async ({ data }): Promise<{ ok: boolean }> => {
+		await recordSummaryRating(
+			data.storyId,
+			data.rating,
+			data.browseSession,
+		).catch(() => {});
 		return { ok: true };
 	});
 

@@ -24,6 +24,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { groupByCategory, loadCatalog } from "#/lib/catalog";
 import { useFeedFilter } from "#/lib/feed-filter";
 import { type FeedView, useFeedView } from "#/lib/feed-view";
+import { getBrowseSession } from "#/lib/session";
 import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { CatalogFeed, Feed, Story } from "#/lib/types";
@@ -407,7 +408,9 @@ function ScoopCard({
 			params={{ storyId: story.id }}
 			// Fire-and-forget the click signal; never block the in-app navigation.
 			onClick={() => {
-				recordStoryOpen({ data: story.id }).catch(() => {});
+				recordStoryOpen({
+					data: { storyId: story.id, browseSession: getBrowseSession() },
+				}).catch(() => {});
 			}}
 			className="whip-card whip-card-hover focus-scoop melt-in group flex h-full flex-col overflow-hidden text-left no-underline"
 			style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}

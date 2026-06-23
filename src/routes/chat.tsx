@@ -5,6 +5,7 @@ import { Markdown } from "#/components/markdown";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
 import { type ChatCitation, storyToCitation } from "#/lib/citation";
+import { getBrowseSession } from "#/lib/session";
 import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import type { Feed, Story } from "#/lib/types";
 import { storyClickHref } from "#/lib/url";
@@ -403,7 +404,7 @@ function CitedScoop({
 	const flavor = flavorByFeed.get(citation.feedId) ?? FLAVORS[0];
 	return (
 		<a
-			href={storyClickHref(citation.storyId, "chat", cid)}
+			href={storyClickHref(citation.storyId, "chat", cid, getBrowseSession())}
 			target="_blank"
 			rel="noreferrer"
 			className="whip-card whip-card-hover focus-scoop group flex w-full items-center gap-3 p-3 text-left no-underline"

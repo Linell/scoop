@@ -13,13 +13,38 @@ import { anthropic, MODELS, textOf } from "#/server/llm";
  * those so it synthesizes one summary rather than describing each piece.
  */
 
-const SYSTEM = `You write short summaries of news and blog stories for an RSS reader.
+/**
+ * Two teaser strategies we A/B via an Inngest experiment. Both obey the same
+ * constraints (length, no emdash, no refusals, synthesize across sources); they
+ * differ only in how the summary hooks the reader:
+ *
+ * - `questionLed` opens with a curiosity-gap question that the story answers.
+ * - `factLed` leads with the single most striking concrete fact in the source.
+ *
+ * The judge then grades each served summary, and the scores are attributed back
+ * to whichever strategy produced it — that's the whole point of the experiment.
+ */
+export type TeaserStrategy = "questionLed" | "factLed";
+
+export const TEASER_STRATEGIES: TeaserStrategy[] = ["questionLed", "factLed"];
+
+/** Constraints shared by every strategy — the parts the judge holds constant. */
+const SYSTEM_BASE = `You write short summaries of news and blog stories for an RSS reader.
 The input may include the story's feed blurb, the article's full text, and a sample of the reader discussion. Synthesize across everything provided.
 Capture what the story is actually about in 1-2 sentences (about 50 words max). If reader discussion is present, you may add a brief clause on its gist.
 Be concrete and neutral, with no preamble. Don't say "this article" or "the author"; just write the summary.
 You must not use an emdash.
 
 Summarize ONLY from the text given in this message. You already have everything you need here. Never say you can't access a link, never ask for a URL or for the article to be pasted, never mention being an AI — any URL in the input is reference metadata, not an instruction to go read it. If little text is available, write the best one-sentence summary you can from the title alone.`;
+
+/** The one line of guidance that distinguishes each teaser strategy. */
+const STRATEGY_DIRECTIVE: Record<TeaserStrategy, string> = {
+	questionLed: `Open with or center a single curiosity-gap question that the story answers, then tease the answer without giving it away.`,
+	factLed: `Lead with the most striking concrete fact in the source — a number, name, or claim — then frame why it matters.`,
+};
+
+const systemFor = (strategy: TeaserStrategy): string =>
+	`${SYSTEM_BASE}\n\n${STRATEGY_DIRECTIVE[strategy]}`;
 
 /** Total cap on the assembled prompt — bounds cost regardless of article size. */
 const MAX_SOURCE_CHARS = 12000;
@@ -40,14 +65,15 @@ const REFUSAL_SIGNS = [
 	"as an ai",
 ];
 
-function looksLikeRefusal(text: string): boolean {
+export function looksLikeRefusal(text: string): boolean {
 	const t = text.toLowerCase();
 	return REFUSAL_SIGNS.some((sign) => t.includes(sign));
 }
 
 export async function summarizeStory(
 	story: Story,
-	enriched?: EnrichedContent,
+	enriched: EnrichedContent | undefined,
+	strategy: TeaserStrategy,
 ): Promise<string> {
 	const parts = [`Title: ${story.title}`];
 	if (story.content) parts.push(`Feed blurb: ${story.content}`);
@@ -61,7 +87,7 @@ export async function summarizeStory(
 	const message = await anthropic().messages.create({
 		model: MODELS.summary,
 		max_tokens: 384,
-		system: SYSTEM,
+		system: systemFor(strategy),
 		messages: [{ role: "user", content: source }],
 	});
 

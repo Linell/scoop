@@ -19,6 +19,9 @@ const story = (over: Partial<Story> = {}): Story => ({
 	imageUrl: null,
 	publishedAt: 0,
 	summary: null,
+	servedVariant: null,
+	experimentName: null,
+	rating: null,
 	...over,
 });
 

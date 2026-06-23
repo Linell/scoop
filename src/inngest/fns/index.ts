@@ -1,6 +1,9 @@
+import { judgeSummaryScorer } from "./judge-summary";
 import { refreshFeed } from "./refresh-feed";
 import { refreshFeeds } from "./refresh-feeds";
 import { resummarizeStory } from "./resummarize-story";
+import { scoreClick } from "./score-click";
+import { scoreRating } from "./score-rating";
 import { summarizeStory } from "./summarize-story";
 
 /**
@@ -12,4 +15,7 @@ export const functions = [
 	refreshFeed,
 	summarizeStory,
 	resummarizeStory,
+	judgeSummaryScorer,
+	scoreClick,
+	scoreRating,
 ];

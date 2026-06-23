@@ -51,15 +51,18 @@ export type ClickSource = "chat" | "story" | "feed";
 /**
  * Link to an article through the click tracker (/r/$storyId) instead of straight
  * to its url, so every outbound click is captured. `cid` ties a chat click to its
- * conversation session; omit it on other surfaces. Used everywhere so all links
- * are built identically.
+ * conversation session; omit it on other surfaces. `bs` ties the click to the
+ * tab's browse session, so a browsing burst groups as one session. Used
+ * everywhere so all links are built identically.
  */
 export function storyClickHref(
 	storyId: string,
 	from: ClickSource,
 	cid?: string,
+	bs?: string,
 ): string {
 	const params = new URLSearchParams({ from });
 	if (cid) params.set("cid", cid);
+	if (bs) params.set("bs", bs);
 	return `/r/${storyId}?${params}`;
 }

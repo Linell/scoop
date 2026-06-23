@@ -18,11 +18,12 @@ async function trackAndRedirect(
 	const params = new URL(request.url).searchParams;
 	const from = params.get("from") ?? "unknown";
 	const cid = params.get("cid") ?? undefined;
+	const bs = params.get("bs") ?? undefined;
 
 	// Best-effort: a tracking hiccup must never cost the reader their click.
 	await recordStoryClick(
 		{ storyId: story.id, feedId: story.feedId, url: story.url, from },
-		cid,
+		{ conversationId: cid, browseSession: bs },
 	).catch(() => {});
 
 	return new Response(null, {

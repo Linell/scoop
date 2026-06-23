@@ -45,6 +45,10 @@ type StoryRow = {
 	published_at: number | null;
 	created_at: number;
 	summary: string | null;
+	served_variant: string | null;
+	experiment_name: string | null;
+	rating: "good" | "oversold" | "spoiled" | null;
+	rated_at: number | null;
 };
 
 const toFeed = (r: FeedRow): Feed => ({
@@ -66,6 +70,9 @@ const toStory = (r: StoryRow): Story => ({
 	imageUrl: r.image_url,
 	publishedAt: r.published_at,
 	summary: r.summary,
+	servedVariant: r.served_variant,
+	experimentName: r.experiment_name,
+	rating: r.rating,
 });
 
 export type IngestResult = {
@@ -204,6 +211,7 @@ type StoryCardRow = Pick<
 	| "published_at"
 	| "created_at"
 	| "summary"
+	| "rating"
 >;
 
 /**
@@ -223,6 +231,13 @@ const toCardStory = (r: StoryCardRow): Story => ({
 	imageUrl: r.image_url,
 	publishedAt: r.published_at,
 	summary: r.summary,
+	// The lean card query never selects the experiment columns (only the detail
+	// view, getStoryById, reads them), so a card Story carries null here.
+	servedVariant: null,
+	experimentName: null,
+	// The card does select `rating` so it can reflect a reader's prior rating;
+	// pre-rating rows carry null.
+	rating: r.rating,
 });
 
 /** A row's effective sort key: its publish date, or ingest time if unknown. */
@@ -250,9 +265,9 @@ export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 		// deliberate tradeoff — fine at demo scale, where partitions are small.
 		const { results } = await db()
 			.prepare(
-				`SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary
+				`SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary, rating
 				 FROM (
-				   SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary,
+				   SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary, rating,
 				     ROW_NUMBER() OVER (
 				       PARTITION BY feed_id
 				       ORDER BY COALESCE(published_at, created_at) DESC
@@ -294,11 +309,52 @@ export async function getStoryById(id: string): Promise<Story | null> {
 	return row ? toStory(row) : null;
 }
 
-/** Store the AI summary for a story. */
-export async function saveSummary(id: string, summary: string): Promise<void> {
+/**
+ * Store the AI summary for a story, along with which experiment variant served
+ * it. The variant + experiment name let us trace a card's summary back to the
+ * teaser strategy that produced it; the judge scores are attributed to the same
+ * variant on the Inngest side.
+ */
+export async function saveSummary(
+	id: string,
+	summary: string,
+	experiment: { name: string; variant: string },
+): Promise<void> {
 	await db()
-		.prepare(`UPDATE stories SET summary = ? WHERE id = ?`)
-		.bind(summary, id)
+		.prepare(
+			`UPDATE stories
+			 SET summary = ?, served_variant = ?, experiment_name = ?
+			 WHERE id = ?`,
+		)
+		.bind(summary, experiment.variant, experiment.name, id)
+		.run();
+}
+
+/**
+ * Persist a reader's rating of a story's summary. The score handler maps the
+ * rating to a per-variant `satisfaction` value on the Inngest side; this just
+ * records the human's choice (and when) so the card can reflect it.
+ */
+export async function saveRating(
+	id: string,
+	rating: "good" | "oversold" | "spoiled",
+	ratedAt: number,
+): Promise<void> {
+	await db()
+		.prepare(`UPDATE stories SET rating = ?, rated_at = ? WHERE id = ?`)
+		.bind(rating, ratedAt, id)
+		.run();
+}
+
+/**
+ * Stamp the time a reader last clicked through to a story. Anchors the click
+ * onto the story within the reader's browse/conversation session; the
+ * `score-click` job is its only writer.
+ */
+export async function recordClick(id: string, at: number): Promise<void> {
+	await db()
+		.prepare(`UPDATE stories SET last_clicked_at = ? WHERE id = ?`)
+		.bind(at, id)
 		.run();
 }
 

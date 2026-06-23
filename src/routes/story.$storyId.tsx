@@ -4,11 +4,71 @@ import { useEffect, useRef, useState } from "react";
 import { LeadImage } from "#/components/lead-image";
 import { Button } from "#/components/ui/button";
 import { useIsAdmin } from "#/lib/admin";
+import { getBrowseSession } from "#/lib/session";
 import { FLAVORS } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import { hashId, storyClickHref } from "#/lib/url";
 import type { StoryDetail } from "#/server/feeds";
-import { getStory, resummarizeStory } from "#/server/feeds";
+import { getStory, rateSummary, resummarizeStory } from "#/server/feeds";
+
+type Rating = "good" | "oversold" | "spoiled";
+
+// The three ways a reader can grade a scoop, mapped to playful labels + emoji.
+const RATING_OPTIONS: { value: Rating; emoji: string; label: string }[] = [
+	{ value: "good", emoji: "👍", label: "Spot on" },
+	{ value: "oversold", emoji: "🫠", label: "Oversold" },
+	{ value: "spoiled", emoji: "🥄", label: "Spoiled it" },
+];
+
+/**
+ * A compact "how was this scoop?" control. Optimistically reflects the picked
+ * rating and fires the durable signal that scores the summary's variant. Shows a
+ * persisted `story.rating` when one is already on the row.
+ */
+function RatingControl({
+	storyId,
+	initial,
+}: {
+	storyId: string;
+	initial: Rating | null;
+}) {
+	const [rating, setRating] = useState<Rating | null>(initial);
+
+	const onRate = (value: Rating) => {
+		if (rating === value) return;
+		setRating(value); // optimistic; the score lands durably on the server
+		// Read the browse session at click time — we're on the client here.
+		const browseSession = getBrowseSession();
+		rateSummary({ data: { storyId, rating: value, browseSession } }).catch(
+			() => {},
+		);
+	};
+
+	return (
+		<div className="flex flex-wrap items-center gap-2 border-border border-t pt-4">
+			<span className="mr-1 text-cocoa-soft text-sm">How was this scoop?</span>
+			{RATING_OPTIONS.map((opt) => {
+				const active = rating === opt.value;
+				return (
+					<button
+						key={opt.value}
+						type="button"
+						onClick={() => onRate(opt.value)}
+						aria-pressed={active}
+						className={`focus-scoop inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+							active
+								? "border-strawberry bg-strawberry/10 font-semibold text-strawberry-ink"
+								: "border-border bg-card text-cocoa-soft hover:border-strawberry hover:text-foreground"
+						}`}
+					>
+						<span aria-hidden>{opt.emoji}</span>
+						{opt.label}
+					</button>
+				);
+			})}
+		</div>
+	);
+}
 
 export const Route = createFileRoute("/story/$storyId")({
 	// Fetch on the server so the page (and its summary) is there on first paint.
@@ -208,7 +268,12 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 
 					<div className="flex flex-wrap items-center gap-3 pt-1">
 						<a
-							href={storyClickHref(story.id, "story")}
+							href={storyClickHref(
+								story.id,
+								"story",
+								undefined,
+								getBrowseSession(),
+							)}
 							target="_blank"
 							rel="noreferrer"
 							aria-label="Read the original article (opens in a new tab)"
@@ -235,6 +300,11 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 							</Button>
 						) : null}
 					</div>
+
+					{/* Let the reader grade the scoop once there's a summary to grade. */}
+					{summary ? (
+						<RatingControl storyId={story.id} initial={story.rating} />
+					) : null}
 				</div>
 			</article>
 		</main>

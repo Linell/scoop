@@ -19,6 +19,9 @@ export type Story = {
 	imageUrl: string | null; // representative image from the feed; null when none
 	publishedAt: number | null; // epoch ms; null when the feed gave no usable date
 	summary: string | null; // AI summary; null until the summarize job fills it in
+	servedVariant: string | null; // experiment variant that produced the summary; null pre-experiment
+	experimentName: string | null; // experiment the variant belongs to; null pre-experiment
+	rating: "good" | "oversold" | "spoiled" | null; // a reader's rating of the summary; null until rated
 };
 
 /**

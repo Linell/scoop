@@ -19,6 +19,7 @@ export function anthropic(): Anthropic {
 export const MODELS = {
 	summary: "claude-haiku-4-5",
 	chat: "claude-sonnet-4-6",
+	judge: "claude-opus-4-8",
 } as const;
 
 /** Flatten a response's text blocks into one trimmed string. */
