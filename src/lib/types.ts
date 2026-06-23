@@ -16,6 +16,7 @@ export type Story = {
 	title: string;
 	author: string | null;
 	content: string | null;
+	imageUrl: string | null; // representative image from the feed; null when none
 	publishedAt: number | null; // epoch ms; null when the feed gave no usable date
 	summary: string | null; // AI summary; null until the summarize job fills it in
 };

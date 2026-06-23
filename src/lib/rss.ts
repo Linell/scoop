@@ -24,6 +24,7 @@ export type ParsedItem = {
 	title: string;
 	author: string | null;
 	content: string | null;
+	imageUrl: string | null; // representative image, or null when the feed has none
 	publishedAt: number | null; // epoch ms, or null when the feed gives no usable date
 };
 
@@ -52,17 +53,126 @@ function text(value: unknown): string {
 	return "";
 }
 
+/** The handful of named entities feeds actually use, beyond the numeric ones. */
+const NAMED_ENTITIES: Record<string, string> = {
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+	nbsp: " ",
+	hellip: "…",
+	mdash: "—",
+	ndash: "–",
+	lsquo: "‘",
+	rsquo: "’",
+	ldquo: "“",
+	rdquo: "”",
+	trade: "™",
+	copy: "©",
+	reg: "®",
+};
+
+/**
+ * Decode HTML entities — numeric (`&#038;`, `&#x27;`) and the common named
+ * ones. Feeds (especially WordPress) frequently double-encode titles, so we
+ * decode repeatedly until the string stops changing; that turns a leftover
+ * `&amp;#038;` → `&#038;` → `&` instead of leaving "&#038;" on the card.
+ */
+const ENTITY_RE = /&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi;
+
+function decodeEntities(input: string): string {
+	let out = input;
+	let changed = true;
+	while (changed) {
+		changed = false;
+		out = out.replace(ENTITY_RE, (match, body) => {
+			let decoded: string | undefined;
+			if (body[0] === "#") {
+				const code =
+					body[1] === "x" || body[1] === "X"
+						? Number.parseInt(body.slice(2), 16)
+						: Number.parseInt(body.slice(1), 10);
+				decoded = Number.isFinite(code)
+					? String.fromCodePoint(code)
+					: undefined;
+			} else {
+				decoded = NAMED_ENTITIES[body.toLowerCase()];
+			}
+			if (decoded === undefined) return match;
+			changed = true;
+			return decoded;
+		});
+	}
+	return out;
+}
+
 export function stripHtml(html: string): string {
-	return html
-		.replace(/<[^>]+>/g, " ")
-		.replace(/&nbsp;/g, " ")
-		.replace(/&amp;/g, "&")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
+	return decodeEntities(html.replace(/<[^>]+>/g, " "))
 		.replace(/\s+/g, " ")
 		.trim();
+}
+
+/** Does a URL point at an image we can render? HTTPS-only, so it loads on our
+ * HTTPS pages without mixed-content blocks; we never host the bytes ourselves. */
+function usableImage(url: string): boolean {
+	return /^https:\/\//i.test(url);
+}
+
+const IMG_EXT = /\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i;
+
+/**
+ * Pick a representative image URL for an item, or null. We look, in order, at
+ * Media RSS nodes (`media:content`, `media:thumbnail`), an image `enclosure`,
+ * then the first inline `<img>` in the raw (pre-stripped) content — taking the
+ * first HTTPS candidate. `rawContent` is the un-stripped HTML, since stripHtml
+ * deletes the `<img>` tags we want to read.
+ */
+function firstImage(
+	item: Record<string, unknown>,
+	rawContent: string,
+): string | null {
+	// Return the first usable HTTPS image, checking sources in priority order so
+	// we never scan the article body for an inline <img> when a media node already
+	// gave us one. Decode entities on the winner so an inline `src` like
+	// `…?w=8&amp;h=10` becomes a real URL rather than one with a bogus query param.
+	const pick = (url: string): string | null =>
+		usableImage(url) ? decodeEntities(url) : null;
+
+	// media:content — the publisher's lead image, but the node can also describe
+	// video/audio, so only take it when it looks like an image.
+	for (const node of asArray(item["media:content"])) {
+		const rec = node as Record<string, unknown>;
+		const url = text(rec["@_url"]);
+		const type = text(rec["@_type"]);
+		if (
+			text(rec["@_medium"]) === "image" ||
+			type.startsWith("image/") ||
+			IMG_EXT.test(url)
+		) {
+			const got = pick(url);
+			if (got) return got;
+		}
+	}
+
+	// media:thumbnail is always an image by spec.
+	for (const node of asArray(item["media:thumbnail"])) {
+		const got = pick(text((node as Record<string, unknown>)["@_url"]));
+		if (got) return got;
+	}
+
+	// An <enclosure> with an image MIME type (some feeds attach the lead image here).
+	for (const node of asArray(item.enclosure)) {
+		const rec = node as Record<string, unknown>;
+		if (text(rec["@_type"]).startsWith("image/")) {
+			const got = pick(text(rec["@_url"]));
+			if (got) return got;
+		}
+	}
+
+	// Fall back to the first inline image embedded in the article body.
+	const inline = rawContent.match(/<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/i);
+	return inline ? pick(inline[1]) : null;
 }
 
 /** Parse a feed date to epoch ms, or null when it's missing/unparseable. */
@@ -132,15 +242,16 @@ function parseRss(channel: Record<string, unknown>): ParsedFeed {
 		(item): ParsedItem => {
 			const link = text(item.link);
 			const guid = text(item.guid) || link;
+			const rawContent =
+				text(item["content:encoded"]) || text(item.description);
 			return {
 				url: link || guid,
 				guid: guid || link,
 				title: stripHtml(text(item.title)) || "(untitled)",
 				author:
 					stripHtml(text(item["dc:creator"]) || text(item.author)) || null,
-				content:
-					stripHtml(text(item["content:encoded"]) || text(item.description)) ||
-					null,
+				content: stripHtml(rawContent) || null,
+				imageUrl: firstImage(item, rawContent),
 				publishedAt: parseDate(item.pubDate ?? item["dc:date"]),
 			};
 		},
@@ -160,12 +271,14 @@ function parseRdf(rdf: Record<string, unknown>): ParsedFeed {
 	const items = asArray(rdf.item as Record<string, unknown>[]).map(
 		(item): ParsedItem => {
 			const link = text(item.link);
+			const rawContent = text(item.description);
 			return {
 				url: link,
 				guid: text(item["@_rdf:about"]) || link,
 				title: stripHtml(text(item.title)) || "(untitled)",
 				author: stripHtml(text(item["dc:creator"])) || null,
-				content: stripHtml(text(item.description)) || null,
+				content: stripHtml(rawContent) || null,
+				imageUrl: firstImage(item, rawContent),
 				publishedAt: parseDate(item["dc:date"]),
 			};
 		},
@@ -185,12 +298,16 @@ function parseAtom(feed: Record<string, unknown>): ParsedFeed {
 			const url = atomLink(entry.link);
 			const id = text(entry.id) || url;
 			const author = entry.author as Record<string, unknown> | undefined;
+			// Image extraction prefers full content (more likely to carry the lead
+			// image) over the summary; the displayed text keeps its summary-first order.
+			const rawContent = text(entry.content) || text(entry.summary);
 			return {
 				url: url || id,
 				guid: id || url,
 				title: stripHtml(text(entry.title)) || "(untitled)",
 				author: author ? stripHtml(text(author.name)) || null : null,
 				content: stripHtml(text(entry.summary) || text(entry.content)) || null,
+				imageUrl: firstImage(entry, rawContent),
 				publishedAt: parseDate(entry.published ?? entry.updated),
 			};
 		},

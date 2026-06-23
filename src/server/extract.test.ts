@@ -16,6 +16,7 @@ const story = (over: Partial<Story> = {}): Story => ({
 	title: "Title",
 	author: null,
 	content: null,
+	imageUrl: null,
 	publishedAt: 0,
 	summary: null,
 	...over,

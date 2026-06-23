@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Check, ExternalLink, Link2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { LeadImage } from "#/components/lead-image";
 import { Button } from "#/components/ui/button";
 import { useIsAdmin } from "#/lib/admin";
 import { FLAVORS } from "#/lib/subscriptions";
@@ -164,6 +165,7 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 					className="flavor-band h-2 w-full"
 					style={{ "--flavor": flavor } as React.CSSProperties}
 				/>
+				<LeadImage src={story.imageUrl} />
 				<div className="flex flex-col gap-5 p-6 sm:p-8">
 					<div className="flex flex-wrap items-center gap-2 text-cocoa-soft text-sm">
 						<span

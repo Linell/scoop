@@ -10,6 +10,7 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LeadImage } from "#/components/lead-image";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
 import {
@@ -22,16 +23,12 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { groupByCategory, loadCatalog } from "#/lib/catalog";
 import { useFeedFilter } from "#/lib/feed-filter";
+import { type FeedView, useFeedView } from "#/lib/feed-view";
 import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { CatalogFeed, Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
-import {
-	addFeed,
-	getFeeds,
-	getStories,
-	recordStoryOpen,
-} from "#/server/feeds";
+import { addFeed, getFeeds, getStories, recordStoryOpen } from "#/server/feeds";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -43,6 +40,9 @@ const SUGGESTED: { title: string; url: string }[] = [
 function Home() {
 	const { subscriptions, hydrated, subscribe, unsubscribe, isSubscribed } =
 		useSubscriptions();
+	// How cards render — text-only (default) or with lead images. Set on the
+	// About page and remembered; the feed itself stays free of chrome.
+	const { view } = useFeedView();
 
 	const [feeds, setFeeds] = useState<Feed[]>([]);
 	const [stories, setStories] = useState<Story[]>([]);
@@ -365,6 +365,7 @@ function Home() {
 										feed={feedById.get(story.feedId)}
 										flavor={flavorById.get(story.feedId) ?? "var(--strawberry)"}
 										index={i}
+										view={view}
 									/>
 								))}
 							</div>
@@ -388,12 +389,18 @@ function ScoopCard({
 	feed,
 	flavor,
 	index,
+	view,
 }: {
 	story: Story;
 	feed: Feed | undefined;
 	flavor: string;
 	index: number;
+	view: FeedView;
 }) {
+	// Photos view shows a lead image when this story has one. Cards without an
+	// image render the plain text layout, so a mixed feed reads as finished cards
+	// (the grid stretches them to equal height) rather than gaps.
+	const showImage = view === "photos" && Boolean(story.imageUrl);
 	return (
 		<Link
 			to="/story/$storyId"
@@ -409,6 +416,7 @@ function ScoopCard({
 				className="flavor-band h-2 w-full"
 				style={{ "--flavor": flavor } as React.CSSProperties}
 			/>
+			{showImage ? <LeadImage src={story.imageUrl} /> : null}
 			<div className="flex flex-1 flex-col gap-3 p-5">
 				<div className="flex items-center gap-2">
 					<span
@@ -428,7 +436,11 @@ function ScoopCard({
 				</h3>
 
 				{story.summary ? (
-					<p className="line-clamp-3 text-sm text-cocoa-soft">
+					<p
+						className={`text-sm text-cocoa-soft ${
+							showImage ? "line-clamp-2" : "line-clamp-3"
+						}`}
+					>
 						{story.summary}
 					</p>
 				) : (

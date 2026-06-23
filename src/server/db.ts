@@ -41,6 +41,7 @@ type StoryRow = {
 	title: string;
 	author: string | null;
 	content: string | null;
+	image_url: string | null;
 	published_at: number | null;
 	created_at: number;
 	summary: string | null;
@@ -62,6 +63,7 @@ const toStory = (r: StoryRow): Story => ({
 	title: r.title,
 	author: r.author,
 	content: r.content,
+	imageUrl: r.image_url,
 	publishedAt: r.published_at,
 	summary: r.summary,
 });
@@ -131,8 +133,8 @@ async function writeStories(
 
 	const stmt = db().prepare(
 		`INSERT OR IGNORE INTO stories
-		   (id, feed_id, url, title, author, content, published_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		   (id, feed_id, url, title, author, content, image_url, published_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	);
 
 	const ids = items.map((item) => hashId(item.guid || item.url));
@@ -144,6 +146,7 @@ async function writeStories(
 			item.title,
 			item.author,
 			item.content,
+			item.imageUrl,
 			item.publishedAt,
 			now,
 		),
@@ -197,16 +200,18 @@ type StoryCardRow = Pick<
 	| "url"
 	| "title"
 	| "author"
+	| "image_url"
 	| "published_at"
 	| "created_at"
 	| "summary"
 >;
 
 /**
- * Map a column-restricted card row to a full Story. The columns the list query
- * deliberately skips (raw `content`) have no value here, so we fill them with
- * null rather than reading an absent field. Detail views go through
- * getStoryById, which selects everything and returns real content.
+ * Map a column-restricted card row to a full Story. The list query still skips
+ * the raw `content` column (kilobytes of feed HTML per row, which no card reads)
+ * and fills it with null here; the detail view (getStoryById) is its only reader.
+ * `image_url` is a short URL string, so the card query does select it — the feed's
+ * Photos view renders it, and it's cheap enough not to undermine the lean list.
  */
 const toCardStory = (r: StoryCardRow): Story => ({
 	id: r.id,
@@ -215,6 +220,7 @@ const toCardStory = (r: StoryCardRow): Story => ({
 	title: r.title,
 	author: r.author,
 	content: null,
+	imageUrl: r.image_url,
 	publishedAt: r.published_at,
 	summary: r.summary,
 });
@@ -233,10 +239,10 @@ export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 		// must not consume a shared LIMIT and starve the others out of the result.
 		//
 		// Select only the columns a card renders — id/feed_id/url/title/author/
-		// published_at/created_at/summary — never the raw `content`. Feed HTML is
-		// often kilobytes per row, and at up to STORIES_PER_FEED rows across every
-		// subscribed feed that's a lot of bandwidth for a column no card reads.
-		// The detail page (getStoryById) is the only reader of content.
+		// image_url/published_at/created_at/summary — never the raw `content`.
+		// Feed HTML is often kilobytes per row, and at up to STORIES_PER_FEED rows
+		// across every subscribed feed that's a lot of bandwidth for a column no
+		// card reads. The detail page (getStoryById) is the only reader of content.
 		//
 		// Note: the stories_feed_published index on (feed_id, published_at DESC)
 		// can't serve this ORDER BY COALESCE(published_at, created_at) DESC, so
@@ -244,9 +250,9 @@ export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 		// deliberate tradeoff — fine at demo scale, where partitions are small.
 		const { results } = await db()
 			.prepare(
-				`SELECT id, feed_id, url, title, author, published_at, created_at, summary
+				`SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary
 				 FROM (
-				   SELECT id, feed_id, url, title, author, published_at, created_at, summary,
+				   SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary,
 				     ROW_NUMBER() OVER (
 				       PARTITION BY feed_id
 				       ORDER BY COALESCE(published_at, created_at) DESC
