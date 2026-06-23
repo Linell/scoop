@@ -1,0 +1,205 @@
+[
+	{
+		"title": "A Collection of Unmitigated Pedantry",
+		"url": "https://acoup.blog/feed/",
+		"siteUrl": "https://acoup.blog/",
+		"description": "Bret Devereaux on military history, the classical world, and how pre-modern societies actually worked.",
+		"category": "History"
+	},
+	{
+		"title": "Simon Willison's Weblog",
+		"url": "https://simonwillison.net/atom/everything/",
+		"siteUrl": "https://simonwillison.net/",
+		"description": "Daily notes on Python, SQLite, LLMs, and building software in the open.",
+		"category": "Programming"
+	},
+	{
+		"title": "Dan Luu",
+		"url": "https://danluu.com/atom.xml",
+		"siteUrl": "https://danluu.com/",
+		"description": "Deeply researched essays on systems, hardware, performance, and engineering culture.",
+		"category": "Programming"
+	},
+	{
+		"title": "Julia Evans (jvns)",
+		"url": "https://jvns.ca/atom.xml",
+		"siteUrl": "https://jvns.ca/",
+		"description": "Approachable deep dives into networking, debugging, and how computers really work.",
+		"category": "Programming"
+	},
+	{
+		"title": "Joel on Software",
+		"url": "https://www.joelonsoftware.com/feed/",
+		"siteUrl": "https://www.joelonsoftware.com/",
+		"description": "Joel Spolsky's classic essays on software development and running a dev team.",
+		"category": "Programming"
+	},
+	{
+		"title": "Martin Fowler",
+		"url": "https://martinfowler.com/feed.atom",
+		"siteUrl": "https://martinfowler.com/",
+		"description": "Refactoring, architecture, and software design from the long-time ThoughtWorks author.",
+		"category": "Programming"
+	},
+	{
+		"title": "Overreacted — Dan Abramov",
+		"url": "https://overreacted.io/rss.xml",
+		"siteUrl": "https://overreacted.io/",
+		"description": "React internals and JavaScript mental models from a former React core team member.",
+		"category": "Web Development"
+	},
+	{
+		"title": "All Things Distributed — Werner Vogels",
+		"url": "https://www.allthingsdistributed.com/atom.xml",
+		"siteUrl": "https://www.allthingsdistributed.com/",
+		"description": "Amazon's CTO on distributed systems, scalability, and cloud architecture.",
+		"category": "Programming"
+	},
+	{
+		"title": "Stratechery — Ben Thompson",
+		"url": "https://stratechery.com/feed/",
+		"siteUrl": "https://stratechery.com/",
+		"description": "Strategic analysis of the business and economics of technology.",
+		"category": "Tech"
+	},
+	{
+		"title": "Quanta Magazine",
+		"url": "https://www.quantamagazine.org/feed/",
+		"siteUrl": "https://www.quantamagazine.org/",
+		"description": "Illuminating reporting on math, physics, biology, and computer science.",
+		"category": "Science"
+	},
+	{
+		"title": "Astral Codex Ten",
+		"url": "https://astralcodexten.substack.com/feed",
+		"siteUrl": "https://www.astralcodexten.com/",
+		"description": "Scott Alexander on science, medicine, statistics, and careful reasoning.",
+		"category": "Science"
+	},
+	{
+		"title": "Wait But Why",
+		"url": "https://waitbutwhy.com/feed",
+		"siteUrl": "https://waitbutwhy.com/",
+		"description": "Long-form, stick-figure-illustrated explainers on big ideas.",
+		"category": "Science"
+	},
+	{
+		"title": "Marginal Revolution",
+		"url": "https://marginalrevolution.com/feed",
+		"siteUrl": "https://marginalrevolution.com/",
+		"description": "Tyler Cowen and Alex Tabarrok on economics, culture, and everything else.",
+		"category": "Business & Economy"
+	},
+	{
+		"title": "FanGraphs Baseball",
+		"url": "https://blogs.fangraphs.com/feed/",
+		"siteUrl": "https://www.fangraphs.com/",
+		"description": "Sabermetrics, projections, prospect rankings, and statistical analysis of MLB.",
+		"category": "Baseball"
+	},
+	{
+		"title": "Baseball Prospectus",
+		"url": "https://www.baseballprospectus.com/feed/",
+		"siteUrl": "https://www.baseballprospectus.com/",
+		"description": "Advanced stats, player projections (PECOTA), and analytical writing.",
+		"category": "Baseball"
+	},
+	{
+		"title": "Baseball America",
+		"url": "https://www.baseballamerica.com/feed/",
+		"siteUrl": "https://www.baseballamerica.com/",
+		"description": "Prospect rankings, the draft, and minor-league coverage.",
+		"category": "Baseball"
+	},
+	{
+		"title": "MLB Trade Rumors",
+		"url": "https://www.mlbtraderumors.com/feed/",
+		"siteUrl": "https://www.mlbtraderumors.com/",
+		"description": "Transactions, free-agency rumors, and roster moves across the league.",
+		"category": "Baseball"
+	},
+	{
+		"title": "Razzball",
+		"url": "https://razzball.com/feed/",
+		"siteUrl": "https://razzball.com/",
+		"description": "Fantasy baseball rankings, projections, and player ratings.",
+		"category": "Baseball"
+	},
+	{
+		"title": "MLB.com News",
+		"url": "https://www.mlb.com/feeds/news/rss.xml",
+		"siteUrl": "https://www.mlb.com/news",
+		"description": "Official Major League Baseball news and headlines.",
+		"category": "Baseball"
+	},
+	{
+		"title": "ESPN MLB",
+		"url": "https://www.espn.com/espn/rss/mlb/news",
+		"siteUrl": "https://www.espn.com/mlb/",
+		"description": "ESPN's Major League Baseball headlines.",
+		"category": "Baseball"
+	},
+	{
+		"title": "r/baseball",
+		"url": "https://www.reddit.com/r/baseball/.rss",
+		"siteUrl": "https://www.reddit.com/r/baseball/",
+		"description": "The main baseball community on Reddit.",
+		"category": "Baseball"
+	},
+	{
+		"title": "Pro Football Talk",
+		"url": "https://profootballtalk.nbcsports.com/feed/",
+		"siteUrl": "https://profootballtalk.nbcsports.com/",
+		"description": "NBC Sports' around-the-clock NFL news and rumors.",
+		"category": "American Football"
+	},
+	{
+		"title": "ESPN NFL",
+		"url": "https://www.espn.com/espn/rss/nfl/news",
+		"siteUrl": "https://www.espn.com/nfl/",
+		"description": "ESPN's National Football League headlines.",
+		"category": "American Football"
+	},
+	{
+		"title": "CBS Sports NFL",
+		"url": "https://www.cbssports.com/rss/headlines/nfl/",
+		"siteUrl": "https://www.cbssports.com/nfl/",
+		"description": "CBS Sports NFL news and headlines.",
+		"category": "American Football"
+	},
+	{
+		"title": "SB Nation NFL",
+		"url": "https://www.sbnation.com/rss/nfl/index.xml",
+		"siteUrl": "https://www.sbnation.com/nfl",
+		"description": "Team-by-team NFL coverage from SB Nation's network.",
+		"category": "American Football"
+	},
+	{
+		"title": "Over the Cap",
+		"url": "https://overthecap.com/feed",
+		"siteUrl": "https://overthecap.com/",
+		"description": "NFL salary-cap analysis, contract data, and roster economics.",
+		"category": "American Football"
+	},
+	{
+		"title": "FantasyPros NFL",
+		"url": "https://www.fantasypros.com/feed/",
+		"siteUrl": "https://www.fantasypros.com/nfl/",
+		"description": "Fantasy football rankings, projections, and player ratings.",
+		"category": "American Football"
+	},
+	{
+		"title": "r/nfl",
+		"url": "https://www.reddit.com/r/nfl/.rss",
+		"siteUrl": "https://www.reddit.com/r/nfl/",
+		"description": "The main NFL community on Reddit.",
+		"category": "American Football"
+	},
+	{
+		"title": "r/CFB — College Football",
+		"url": "https://www.reddit.com/r/CFB/.rss",
+		"siteUrl": "https://www.reddit.com/r/CFB/",
+		"description": "Reddit's college football community: rankings, polls, and game threads.",
+		"category": "American Football"
+	}
+]

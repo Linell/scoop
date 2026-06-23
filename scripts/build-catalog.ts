@@ -1,14 +1,16 @@
 /**
- * Build the feed-discovery catalog from plenaryapp/awesome-rss-feeds.
+ * Build the feed-discovery catalog from plenaryapp/awesome-rss-feeds, layered
+ * with our own hand-picked feeds in `scripts/curated-feeds.json`.
  *
  * One-shot generator: downloads the categorized OPML files, parses them with
- * the same fast-xml-parser config the runtime uses, dedupes by normalized URL,
- * and writes a committed `src/data/catalog.json`. Re-run with
- * `pnpm build-catalog` whenever you want to refresh the bundled catalog — the
- * app never touches GitHub at runtime.
+ * the same fast-xml-parser config the runtime uses, merges in the curated
+ * feeds (which win on URL collisions and can add new categories like Baseball
+ * and American Football), dedupes by normalized URL, and writes a committed
+ * `src/data/catalog.json`. Re-run with `pnpm build-catalog` whenever you want
+ * to refresh the bundled catalog — the app never touches GitHub at runtime.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { XMLParser } from "fast-xml-parser";
@@ -21,6 +23,7 @@ const USER_AGENT = "Scoop catalog builder (+https://github.com/inngest)";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = join(here, "..", "src", "data", "catalog.json");
+const CURATED = join(here, "curated-feeds.json");
 
 // Mirror the runtime parser: keep attributes, prefix them with @_.
 const parser = new XMLParser({
@@ -105,6 +108,15 @@ async function main() {
 		}
 		console.log(`  ${category}: ${feeds.length} feeds`);
 	}
+
+	// Layer our curated picks on top. These overwrite any awesome-rss-feeds
+	// entry sharing a normalized URL, so a hand-written title/description/
+	// category wins over the upstream one.
+	const curated = JSON.parse(await readFile(CURATED, "utf8")) as CatalogFeed[];
+	for (const feed of curated) {
+		byUrl.set(normalizeUrl(feed.url), feed);
+	}
+	console.log(`  curated: ${curated.length} feeds`);
 
 	const catalog = [...byUrl.values()].sort(
 		(a, b) =>
