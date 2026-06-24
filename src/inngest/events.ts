@@ -48,9 +48,11 @@ export const storyClicked = eventType("scoop/story.clicked", {
 		from: z.string(),
 		// What the reader actually did: `open` = viewed the in-app show page (a
 		// weak signal), `through` = clicked out to the original article (the strong
-		// teaser signal). `from` records the surface and can't distinguish these
-		// (an outbound link can also carry from:"feed"), so the action is explicit.
-		action: z.enum(["open", "through"]),
+		// teaser signal), `discussion` = clicked out to the comments/discussion page
+		// (a distinct intent — wanting the conversation, not the article). `from`
+		// records the surface and can't distinguish these (an outbound link can also
+		// carry from:"feed"), so the action is explicit.
+		action: z.enum(["open", "through", "discussion"]),
 	}),
 });
 
@@ -89,12 +91,18 @@ export async function requestResummarize(storyId: string): Promise<void> {
 	await inngest.send(storyResummarizeRequested.create({ storyId }));
 }
 
+/** Ask the catalog to ingest a single feed now (used when a subscribe promotes a
+ *  cataloged feed that has no stories yet). */
+export async function requestFeedRefresh(feedUrl: string): Promise<void> {
+	await inngest.send(feedRefreshRequested.create({ feedUrl }));
+}
+
 type StoryClick = {
 	storyId: string;
 	feedId: string;
 	url: string;
 	from: string;
-	action: "open" | "through";
+	action: "open" | "through" | "discussion";
 };
 
 /**

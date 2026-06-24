@@ -5,7 +5,8 @@ import {
 	normalizeUrl,
 	type ParsedFeed,
 } from "#/lib/rss";
-import type { Feed, Story } from "#/lib/types";
+import type { CatalogFeed, Feed, Story } from "#/lib/types";
+import { faviconUrl } from "#/lib/url";
 
 /**
  * D1 data access for the shared catalog. Everything keys off a URL hash so the
@@ -38,6 +39,7 @@ type StoryRow = {
 	id: string;
 	feed_id: string;
 	url: string;
+	discussion_url: string | null;
 	title: string;
 	author: string | null;
 	content: string | null;
@@ -54,6 +56,7 @@ type StoryRow = {
 	save_count: number;
 	open_count: number;
 	clickthrough_count: number;
+	discussion_count: number;
 };
 
 const toFeed = (r: FeedRow): Feed => ({
@@ -69,6 +72,7 @@ const toStory = (r: StoryRow): Story => ({
 	id: r.id,
 	feedId: r.feed_id,
 	url: r.url,
+	discussionUrl: r.discussion_url,
 	title: r.title,
 	author: r.author,
 	content: r.content,
@@ -101,12 +105,13 @@ export async function ingestFeed(rawUrl: string): Promise<IngestResult> {
 
 	await db()
 		.prepare(
-			`INSERT INTO feeds (id, feed_url, title, site_url, description, fetched_at, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO feeds (id, feed_url, title, site_url, description, icon_url, fetched_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			   title = excluded.title,
 			   site_url = excluded.site_url,
 			   description = excluded.description,
+			   icon_url = COALESCE(feeds.icon_url, excluded.icon_url),
 			   fetched_at = excluded.fetched_at`,
 		)
 		.bind(
@@ -115,6 +120,7 @@ export async function ingestFeed(rawUrl: string): Promise<IngestResult> {
 			parsed.title,
 			parsed.siteUrl,
 			parsed.description,
+			faviconUrl(parsed.siteUrl, feedUrl),
 			now,
 			now,
 		)
@@ -146,8 +152,8 @@ async function writeStories(
 
 	const stmt = db().prepare(
 		`INSERT OR IGNORE INTO stories
-		   (id, feed_id, url, title, author, content, image_url, published_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   (id, feed_id, url, discussion_url, title, author, content, image_url, published_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	);
 
 	const ids = items.map((item) => hashId(item.guid || item.url));
@@ -156,6 +162,7 @@ async function writeStories(
 			ids[i],
 			feedId,
 			item.url,
+			item.discussionUrl,
 			item.title,
 			item.author,
 			item.content,
@@ -211,6 +218,7 @@ type StoryCardRow = Pick<
 	| "id"
 	| "feed_id"
 	| "url"
+	| "discussion_url"
 	| "title"
 	| "author"
 	| "image_url"
@@ -231,6 +239,7 @@ const toCardStory = (r: StoryCardRow): Story => ({
 	id: r.id,
 	feedId: r.feed_id,
 	url: r.url,
+	discussionUrl: r.discussion_url,
 	title: r.title,
 	author: r.author,
 	content: null,
@@ -272,9 +281,9 @@ export async function getStoriesByFeedIds(ids: string[]): Promise<Story[]> {
 		// deliberate tradeoff — fine at demo scale, where partitions are small.
 		const { results } = await db()
 			.prepare(
-				`SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary, rating
+				`SELECT id, feed_id, url, discussion_url, title, author, image_url, published_at, created_at, summary, rating
 				 FROM (
-				   SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary, rating,
+				   SELECT id, feed_id, url, discussion_url, title, author, image_url, published_at, created_at, summary, rating,
 				     ROW_NUMBER() OVER (
 				       PARTITION BY feed_id
 				       ORDER BY COALESCE(published_at, created_at) DESC
@@ -316,7 +325,7 @@ export async function getStoriesByIds(ids: string[]): Promise<Story[]> {
 		const placeholders = slice.map(() => "?").join(", ");
 		const { results } = await db()
 			.prepare(
-				`SELECT id, feed_id, url, title, author, image_url, published_at, created_at, summary, rating
+				`SELECT id, feed_id, url, discussion_url, title, author, image_url, published_at, created_at, summary, rating
 				 FROM stories WHERE id IN (${placeholders})`,
 			)
 			.bind(...slice)
@@ -377,19 +386,25 @@ export async function saveRating(
 
 /**
  * Stamp the time a reader last clicked a story and bump the counter for that
- * kind of click — `open` (viewed the in-app show page) or `through` (clicked out
- * to the original article) — returning the new total for that kind. Anchors the
- * click within the reader's browse/conversation session; the `score-click` job
- * is its only writer and emits the returned count as a per-variant experiment
- * score. The `+ 1` runs in a single UPDATE so concurrent clicks each count once.
+ * kind of click — `open` (viewed the in-app show page), `through` (clicked out
+ * to the original article), or `discussion` (clicked out to the comments page) —
+ * returning the new total for that kind. Anchors the click within the reader's
+ * browse/conversation session; the `score-click` job is its only writer and
+ * emits the returned count as a per-variant experiment score. The `+ 1` runs in
+ * a single UPDATE so concurrent clicks each count once.
  */
 export async function recordClick(
 	id: string,
 	at: number,
-	kind: "open" | "through",
+	kind: "open" | "through" | "discussion",
 ): Promise<number> {
 	// `col` is a fixed literal chosen from `kind`, never user input.
-	const col = kind === "open" ? "open_count" : "clickthrough_count";
+	const col =
+		kind === "open"
+			? "open_count"
+			: kind === "discussion"
+				? "discussion_count"
+				: "clickthrough_count";
 	const row = await db()
 		.prepare(
 			`UPDATE stories SET last_clicked_at = ?, ${col} = ${col} + 1
@@ -428,12 +443,174 @@ export async function clearSummary(id: string): Promise<void> {
 		.run();
 }
 
-/** All feed urls in the catalog — used by the refresh cron. */
+/** Urls of the active feeds (the refresh cron's rotation). */
 export async function getAllFeedUrls(): Promise<string[]> {
 	const { results } = await db()
-		.prepare(`SELECT feed_url FROM feeds`)
+		.prepare(`SELECT feed_url FROM feeds WHERE status = 'active'`)
 		.all<{ feed_url: string }>();
 	return results.map((r) => r.feed_url);
+}
+
+// --- Catalog + subscriptions -----------------------------------------------
+// The browsable feed catalog and the per-visitor subscriptions that promote a
+// feed into the refresh rotation. A feed's status walks 'cataloged' (browsable,
+// never fetched) → 'active' (has a subscriber) → 'dormant' (lost its last one).
+
+type CatalogRow = {
+	feed_url: string;
+	title: string;
+	site_url: string | null;
+	description: string | null;
+	category: string | null;
+	icon_url: string | null;
+	subscriber_count: number;
+};
+
+/** The whole browsable catalog, most-followed first then alphabetical. The
+ *  browse dialog groups + searches client-side, so we return the lot — capped
+ *  well above the current size as cheap insurance against unbounded growth. */
+export async function getCatalog(): Promise<CatalogFeed[]> {
+	const { results } = await db()
+		.prepare(
+			`SELECT f.feed_url, f.title, f.site_url, f.description, f.category, f.icon_url,
+			        COUNT(s.client_id) AS subscriber_count
+			 FROM feeds f
+			 LEFT JOIN feed_subscriptions s ON s.feed_id = f.id
+			 GROUP BY f.id
+			 ORDER BY subscriber_count DESC, f.title COLLATE NOCASE
+			 LIMIT 2000`,
+		)
+		.all<CatalogRow>();
+	return results.map((r) => ({
+		title: r.title,
+		url: r.feed_url,
+		siteUrl: r.site_url,
+		description: r.description,
+		category: r.category ?? "Uncategorized",
+		iconUrl: r.icon_url,
+		subscriberCount: r.subscriber_count,
+	}));
+}
+
+/**
+ * Record a visitor's subscription to a feed and promote it into the refresh
+ * rotation. Returns the feed's url plus whether it still needs an initial ingest
+ * (no stories yet), or null when the feed id is unknown.
+ */
+export async function subscribeFeed(
+	clientId: string,
+	feedId: string,
+): Promise<{ feedUrl: string; needsIngest: boolean } | null> {
+	// Look up the feed FIRST — one round-trip that also reports whether it
+	// already has stories. An unknown id must never leave behind an orphan
+	// subscription row (which would inflate getCatalog's subscriber_count for a
+	// feed that doesn't exist).
+	const feed = await db()
+		.prepare(
+			`SELECT f.feed_url, EXISTS(SELECT 1 FROM stories WHERE feed_id = f.id) AS has_stories
+			 FROM feeds f WHERE f.id = ?`,
+		)
+		.bind(feedId)
+		.first<{ feed_url: string; has_stories: number }>();
+	if (!feed) return null;
+
+	// Record the subscription and promote the feed in one batched (transactional)
+	// round-trip. The promote only flips a non-active feed, never re-stamps an
+	// active one.
+	await db().batch([
+		db()
+			.prepare(
+				`INSERT OR IGNORE INTO feed_subscriptions (client_id, feed_id, created_at)
+				 VALUES (?, ?, ?)`,
+			)
+			.bind(clientId, feedId, Date.now()),
+		db()
+			.prepare(
+				`UPDATE feeds SET status = 'active' WHERE id = ? AND status != 'active'`,
+			)
+			.bind(feedId),
+	]);
+
+	return { feedUrl: feed.feed_url, needsIngest: feed.has_stories === 0 };
+}
+
+/**
+ * Drop a visitor's subscription and demote the feed to 'dormant' if that was its
+ * last subscriber. Both the delete and the demote are guarded so a feed only
+ * leaves the rotation when no one follows it.
+ */
+export async function unsubscribeFeed(
+	clientId: string,
+	feedId: string,
+): Promise<void> {
+	// One batched (transactional, ordered) round-trip: the demote's NOT EXISTS
+	// observes the delete, so a feed only leaves the rotation when no one follows it.
+	await db().batch([
+		db()
+			.prepare(
+				`DELETE FROM feed_subscriptions WHERE client_id = ? AND feed_id = ?`,
+			)
+			.bind(clientId, feedId),
+		db()
+			.prepare(
+				`UPDATE feeds SET status = 'dormant'
+				 WHERE id = ? AND status = 'active'
+				   AND NOT EXISTS (SELECT 1 FROM feed_subscriptions WHERE feed_id = ?)`,
+			)
+			.bind(feedId, feedId),
+	]);
+}
+
+/** A single feed by id (used by submit for dedup). Null if unknown. */
+export async function getFeedById(id: string): Promise<Feed | null> {
+	const row = await db()
+		.prepare(`SELECT * FROM feeds WHERE id = ?`)
+		.bind(id)
+		.first<FeedRow>();
+	return row ? toFeed(row) : null;
+}
+
+/**
+ * Catalog a feed WITHOUT fetching its stories: status stays 'cataloged' and
+ * fetched_at is 0 until a subscribe promotes it. INSERT OR IGNORE so a submit of
+ * an already-known feed is a no-op.
+ */
+export async function insertCatalogedFeed(args: {
+	id: string;
+	feedUrl: string;
+	title: string;
+	siteUrl: string | null;
+	description: string | null;
+	category: string | null;
+	iconUrl: string | null;
+}): Promise<void> {
+	await db()
+		.prepare(
+			`INSERT OR IGNORE INTO feeds
+			   (id, feed_url, title, site_url, description, category, icon_url, status, fetched_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'cataloged', 0, ?)`,
+		)
+		.bind(
+			args.id,
+			args.feedUrl,
+			args.title,
+			args.siteUrl,
+			args.description,
+			args.category,
+			args.iconUrl,
+			Date.now(),
+		)
+		.run();
+}
+
+/** The distinct category names present in the catalog, alphabetical. */
+export async function listCategories(): Promise<string[]> {
+	const { results } = await db()
+		.prepare(
+			`SELECT DISTINCT category FROM feeds WHERE category IS NOT NULL ORDER BY category`,
+		)
+		.all<{ category: string }>();
+	return results.map((r) => r.category);
 }
 
 // --- Shared lists ----------------------------------------------------------

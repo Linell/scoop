@@ -16,7 +16,8 @@ import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
-import { addFeed, getFeeds, getStories, recordStorySave } from "#/server/feeds";
+import { useAddFeed } from "#/lib/use-add-feed";
+import { getFeeds, getStories, recordStorySave } from "#/server/feeds";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -111,16 +112,9 @@ function Home() {
 		[subscriptions, selected],
 	);
 
-	// Add (or refresh) a feed by URL and subscribe to it. Returns an error string.
-	const addByUrl = useCallback(
-		async (url: string): Promise<string | null> => {
-			const res = await addFeed({ data: url });
-			if (!res.ok) return res.error;
-			subscribe(res.feed.id);
-			return null;
-		},
-		[subscribe],
-	);
+	// The shared follow flow: addByUrl (for the empty-state's suggested URLs) and
+	// onDialogAdd (the browse dialog's combined catalog-pick / paste-URL handler).
+	const { addByUrl, onDialogAdd } = useAddFeed(subscribe);
 
 	// Save handler shared by every card in the grid. On a transition INTO saved,
 	// fire the durable save signal best-effort; unsaving is purely local.
@@ -255,7 +249,7 @@ function Home() {
 			<BrowseFlavorsDialog
 				open={dialogOpen}
 				onOpenChange={setDialogOpen}
-				onAdd={addByUrl}
+				onAdd={onDialogAdd}
 				isSubscribed={isSubscribed}
 			/>
 		</main>

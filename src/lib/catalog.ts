@@ -1,18 +1,19 @@
 import type { CatalogFeed } from "./types.ts";
 
 /**
- * The feed-discovery catalog (see scripts/build-catalog.ts). The data is a
- * committed JSON blob, so we dynamic-import it on first use to keep it out of
- * the initial client bundle — it's only needed once the browse dialog opens.
+ * The feed-discovery catalog, served live from D1 by the getCatalog server fn
+ * (so newly-submitted feeds show up for everyone). Fetched on first use and
+ * cached as a promise — it's only needed once the browse dialog opens.
  */
 
 let cache: Promise<CatalogFeed[]> | null = null;
 
 export function loadCatalog(): Promise<CatalogFeed[]> {
 	if (!cache) {
-		cache = import("#/data/catalog.json").then(
-			(mod) => mod.default as CatalogFeed[],
-		);
+		// Lazy-import the server fn so this client lib never statically pulls the
+		// server module graph (cloudflare:workers/D1) into the client bundle or a
+		// unit test that happens to import it — same reasoning as subscriptions.ts.
+		cache = import("#/server/feeds").then((m) => m.getCatalog());
 	}
 	return cache;
 }

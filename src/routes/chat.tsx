@@ -404,7 +404,10 @@ function CitedScoop({
 	const flavor = flavorByFeed.get(citation.feedId) ?? FLAVORS[0];
 	return (
 		<a
-			href={storyClickHref(citation.storyId, "chat", cid, getBrowseSession())}
+			href={storyClickHref(citation.storyId, "chat", {
+				cid,
+				bs: getBrowseSession(),
+			})}
 			target="_blank"
 			rel="noreferrer"
 			className="whip-card whip-card-hover focus-scoop group flex w-full items-center gap-3 p-3 text-left no-underline"

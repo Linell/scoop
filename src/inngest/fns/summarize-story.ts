@@ -129,6 +129,11 @@ export const summarizeStory = inngest.createFunction(
 			experiment: experimentRef,
 		});
 		await inngest.score.experiment({
+			name: "discussions",
+			value: 0,
+			experiment: experimentRef,
+		});
+		await inngest.score.experiment({
 			name: "saves",
 			value: 0,
 			experiment: experimentRef,

@@ -9,6 +9,7 @@
     "dev": "vite dev --port 3000",
     "generate-routes": "tsr generate",
     "build-catalog": "tsx scripts/build-catalog.ts",
+    "seed:catalog": "tsx scripts/seed-catalog.ts",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -16,7 +17,7 @@
     "lint": "biome lint",
     "check": "biome check",
     "deploy:db": "wrangler d1 migrations apply scoop --remote",
-    "deploy": "pnpm run build && wrangler deploy && curl -fsS -X PUT https://scoop.thelinell.com/api/inngest"
+    "deploy": "pnpm run deploy:db && pnpm run build && wrangler deploy && curl -fsS -X PUT https://scoop.thelinell.com/api/inngest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

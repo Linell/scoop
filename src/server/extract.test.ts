@@ -13,6 +13,7 @@ const story = (over: Partial<Story> = {}): Story => ({
 	id: "s1",
 	feedId: "f1",
 	url: "https://example.com/article",
+	discussionUrl: null,
 	title: "Title",
 	author: null,
 	content: null,

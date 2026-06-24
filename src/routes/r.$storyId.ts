@@ -20,21 +20,31 @@ async function trackAndRedirect(
 	const cid = params.get("cid") ?? undefined;
 	const bs = params.get("bs") ?? undefined;
 
+	// `t=discussion` routes to the story's comments page (the strong "I want the
+	// conversation" intent), falling back to the article if the feed gave no
+	// discussion url. The destination is still resolved here from the story id —
+	// never carried in the link — so this can't be turned into an open redirect.
+	const wantsDiscussion = params.get("t") === "discussion";
+	const dest =
+		wantsDiscussion && story.discussionUrl ? story.discussionUrl : story.url;
+	const action =
+		wantsDiscussion && story.discussionUrl ? "discussion" : "through";
+
 	// Best-effort: a tracking hiccup must never cost the reader their click.
 	await recordStoryClick(
 		{
 			storyId: story.id,
 			feedId: story.feedId,
-			url: story.url,
+			url: dest,
 			from,
-			action: "through",
+			action,
 		},
 		{ conversationId: cid, browseSession: bs },
 	).catch(() => {});
 
 	return new Response(null, {
 		status: 302,
-		headers: { Location: story.url, "Cache-Control": "no-store" },
+		headers: { Location: dest, "Cache-Control": "no-store" },
 	});
 }
 

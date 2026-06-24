@@ -122,13 +122,13 @@ async function fetchArticleText(url: string): Promise<string> {
 }
 
 /**
- * Find a Hacker News discussion id. hnrss puts the thread link either in the
- * story's content ("Comments URL: …item?id=NNN") or in the url itself, and some
- * items point `url` at the external article with the thread only in content —
- * so check both.
+ * Find a Hacker News discussion id. The feed's <comments> element (now parsed
+ * into `discussionUrl`) is the cleanest source; fall back to the url itself or
+ * the content ("Comments URL: …item?id=NNN"), since some items point `url` at
+ * the external article with the thread only in content — so check all three.
  */
 function hnItemId(story: Story): string | null {
-	for (const text of [story.url, story.content]) {
+	for (const text of [story.discussionUrl, story.url, story.content]) {
 		const match = text?.match(/news\.ycombinator\.com\/item\?id=(\d+)/);
 		if (match) return match[1];
 	}

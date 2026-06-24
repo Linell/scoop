@@ -13,6 +13,7 @@ export type Story = {
 	id: string;
 	feedId: string;
 	url: string;
+	discussionUrl: string | null; // comments/discussion page (e.g. the HN thread); null when the feed has none
 	title: string;
 	author: string | null;
 	content: string | null;
@@ -26,9 +27,23 @@ export type Story = {
 };
 
 /**
- * A discovery-catalog entry: feed metadata sourced from the awesome-rss-feeds
- * OPML files at build time (see scripts/build-catalog.ts). Purely for browse +
- * search — adding one still routes through the live ingest path by `url`.
+ * The seed shape: feed metadata sourced from the awesome-rss-feeds OPML files at
+ * build time (see scripts/build-catalog.ts) and written to src/data/catalog.json.
+ * Consumed once by scripts/seed-catalog.ts to populate the D1 `feeds` table;
+ * never read at runtime once seeded.
+ */
+export type SeedFeed = {
+	title: string;
+	url: string;
+	siteUrl: string | null;
+	description: string | null;
+	category: string;
+};
+
+/**
+ * A live discovery-catalog entry, served from the D1 `feeds` table by the
+ * getCatalog server fn (the browse dialog's data source). Purely for browse +
+ * search — following one routes through the subscribe path by `url`/id.
  */
 export type CatalogFeed = {
 	title: string;
@@ -36,4 +51,6 @@ export type CatalogFeed = {
 	siteUrl: string | null;
 	description: string | null;
 	category: string;
+	iconUrl: string | null; // site favicon for a nicer browse row; null when unknown
+	subscriberCount: number; // how many visitors follow this feed, for popularity ranking
 };

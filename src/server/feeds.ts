@@ -6,19 +6,27 @@ import {
 	queueStorySummaries,
 	recordStoryClick,
 	recordSummaryRating,
+	requestFeedRefresh,
 	requestResummarize,
 } from "#/inngest/events";
-import { FeedError } from "#/lib/rss";
-import type { Feed, Story } from "#/lib/types";
+import { FeedError, fetchAndParseFeed } from "#/lib/rss";
+import type { CatalogFeed, Feed, Story } from "#/lib/types";
+import { faviconUrl, hashId, normalizeUrl } from "#/lib/url";
+import { classifyCategory } from "./categorize";
 import {
 	createSharedList,
+	getCatalog as getCatalogRows,
+	getFeedById,
 	getFeedsByIds,
 	getSharedList,
 	getStoriesByFeedIds,
 	getStoriesByIds,
 	getStoryById,
 	ingestFeed,
+	insertCatalogedFeed,
 	type SharedListKind,
+	subscribeFeed as subscribeFeedDb,
+	unsubscribeFeed as unsubscribeFeedDb,
 } from "./db";
 
 /**
@@ -34,6 +42,20 @@ function validateUrl(input: unknown): string {
 		throw new Error("A feed URL is required.");
 	}
 	return input.trim();
+}
+
+/** A feed id + client id pair, for the subscribe/unsubscribe endpoints. */
+function validateSubscription(input: unknown): {
+	feedId: string;
+	clientId: string;
+} {
+	const data = input as { feedId?: unknown; clientId?: unknown };
+	const feedId = typeof data?.feedId === "string" ? data.feedId.trim() : "";
+	if (feedId === "") throw new Error("A feed id is required.");
+	const clientId =
+		typeof data?.clientId === "string" ? data.clientId.trim() : "";
+	if (clientId === "") throw new Error("A client id is required.");
+	return { feedId, clientId };
 }
 
 // Cap the fan-out so a tampered client can't ask for thousands at once. Shared
@@ -124,7 +146,10 @@ function validateRating(input: unknown): {
 /** A story plus the feed it belongs to — the payload for a story detail page. */
 export type StoryDetail = { story: Story; feed: Feed | null };
 
-/** Add (or refresh) a feed by URL and store its stories. Friendly on failure. */
+/** Add (or refresh) a feed by URL and store its stories. Friendly on failure.
+ *  Following it — the server-side subscription + promotion to active — is owned
+ *  by the subscriptions hook, which calls subscribeFeed right after this
+ *  resolves; ingest here just makes sure the feed and its stories exist. */
 export const addFeed = createServerFn({ method: "POST" })
 	.validator(validateUrl)
 	.handler(async ({ data: url }): Promise<AddFeedResult> => {
@@ -140,6 +165,89 @@ export const addFeed = createServerFn({ method: "POST" })
 					? err.message
 					: "Something went wrong adding that feed.";
 			return { ok: false, error: message };
+		}
+	});
+
+/** The whole browsable feed catalog (the browse dialog's data source). */
+export const getCatalog = createServerFn({ method: "GET" }).handler(
+	async (): Promise<CatalogFeed[]> => getCatalogRows(),
+);
+
+/**
+ * Follow a feed: records the subscription, promotes the feed into the refresh
+ * rotation, and kicks off an initial ingest when the feed has no stories yet.
+ * Best-effort on the refresh send. `ok` is false only when the feed is unknown.
+ */
+export const subscribeFeed = createServerFn({ method: "POST" })
+	.validator(validateSubscription)
+	.handler(async ({ data }): Promise<{ ok: boolean }> => {
+		const result = await subscribeFeedDb(data.clientId, data.feedId);
+		if (result?.needsIngest) {
+			await requestFeedRefresh(result.feedUrl).catch(() => {});
+		}
+		return { ok: result != null };
+	});
+
+/** Unfollow a feed; demotes it to dormant if that was its last subscriber. */
+export const unsubscribeFeed = createServerFn({ method: "POST" })
+	.validator(validateSubscription)
+	.handler(async ({ data }): Promise<{ ok: true }> => {
+		await unsubscribeFeedDb(data.clientId, data.feedId);
+		return { ok: true };
+	});
+
+/**
+ * The outcome of submitting a feed url to the catalog: either it was cataloged
+ * (or was already there), or it couldn't be read. `already` distinguishes a
+ * brand-new catalog entry from one that already existed.
+ */
+export type SubmitFeedResult =
+	| { ok: true; already: boolean; title: string; category?: string | null }
+	| { ok: false; error: string };
+
+/**
+ * Submit a feed url to the catalog WITHOUT subscribing or fetching its stories:
+ * validate it's https, dedupe against the catalog, fetch+parse just enough to
+ * confirm it's readable, classify it into a category, and store it as
+ * 'cataloged'. Following it later (via subscribe) is what triggers the ingest.
+ */
+export const submitFeed = createServerFn({ method: "POST" })
+	.validator(validateUrl)
+	.handler(async ({ data: url }): Promise<SubmitFeedResult> => {
+		const feedUrl = normalizeUrl(url);
+		if (!/^https:\/\//i.test(feedUrl)) {
+			return { ok: false, error: "Feeds must be served over https." };
+		}
+		const id = hashId(feedUrl);
+		const existing = await getFeedById(id);
+		if (existing) {
+			return { ok: true, already: true, title: existing.title };
+		}
+		try {
+			const parsed = await fetchAndParseFeed(feedUrl);
+			if (parsed.items.length === 0) {
+				return { ok: false, error: "That feed has no readable entries." };
+			}
+			const category = await classifyCategory({
+				title: parsed.title,
+				description: parsed.description,
+				itemTitles: parsed.items.slice(0, 8).map((i) => i.title),
+			}).catch(() => null);
+			const iconUrl = faviconUrl(parsed.siteUrl, feedUrl);
+			await insertCatalogedFeed({
+				id,
+				feedUrl,
+				title: parsed.title,
+				siteUrl: parsed.siteUrl,
+				description: parsed.description,
+				category,
+				iconUrl,
+			});
+			return { ok: true, already: false, title: parsed.title, category };
+		} catch (err) {
+			const error =
+				err instanceof FeedError ? err.message : "Could not read that feed.";
+			return { ok: false, error };
 		}
 	});
 

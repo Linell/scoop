@@ -18,7 +18,8 @@ import { getClientId } from "#/lib/client-id";
 import { type FeedView, useFeedView } from "#/lib/feed-view";
 import { type Subscription, useSubscriptions } from "#/lib/subscriptions";
 import type { Feed } from "#/lib/types";
-import { addFeed, createList, getFeeds } from "#/server/feeds";
+import { useAddFeed } from "#/lib/use-add-feed";
+import { createList, getFeeds } from "#/server/feeds";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -59,16 +60,8 @@ function Settings() {
 		};
 	}, [ids, hydrated]);
 
-	// Add (or refresh) a feed by URL and subscribe to it. Returns an error string.
-	const addByUrl = useCallback(
-		async (url: string): Promise<string | null> => {
-			const res = await addFeed({ data: url });
-			if (!res.ok) return res.error;
-			subscribe(res.feed.id);
-			return null;
-		},
-		[subscribe],
-	);
+	// The browse dialog's combined catalog-pick / paste-URL follow handler.
+	const { onDialogAdd } = useAddFeed(subscribe);
 
 	// Unfollowing is soft-destructive, so it never happens silently: we stash the
 	// removed subscription (and where it sat) and surface an "Undo" toast for a
@@ -263,7 +256,7 @@ function Settings() {
 			<BrowseFlavorsDialog
 				open={dialogOpen}
 				onOpenChange={setDialogOpen}
-				onAdd={addByUrl}
+				onAdd={onDialogAdd}
 				isSubscribed={isSubscribed}
 			/>
 

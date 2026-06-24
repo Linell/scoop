@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { XMLParser } from "fast-xml-parser";
 import { normalizeUrl } from "../src/lib/url.ts";
-import type { CatalogFeed } from "../src/lib/types.ts";
+import type { SeedFeed } from "../src/lib/types.ts";
 
 const REPO = "plenaryapp/awesome-rss-feeds";
 const DIR = "recommended/with_category";
@@ -62,7 +62,7 @@ async function listOpmlFiles(): Promise<GhEntry[]> {
 }
 
 /** Pull every feed outline (with an xmlUrl) out of one OPML document. */
-function feedsFromOpml(xml: string, category: string): CatalogFeed[] {
+function feedsFromOpml(xml: string, category: string): SeedFeed[] {
 	const doc = parser.parse(xml) as {
 		opml?: { body?: { outline?: Outline | Outline[] } };
 	};
@@ -89,7 +89,7 @@ async function main() {
 	const files = await listOpmlFiles();
 	console.log(`Found ${files.length} OPML files.`);
 
-	const byUrl = new Map<string, CatalogFeed>();
+	const byUrl = new Map<string, SeedFeed>();
 	for (const file of files) {
 		const category = file.name.replace(/\.opml$/i, "");
 		const res = await fetch(file.download_url, {
@@ -112,7 +112,7 @@ async function main() {
 	// Layer our curated picks on top. These overwrite any awesome-rss-feeds
 	// entry sharing a normalized URL, so a hand-written title/description/
 	// category wins over the upstream one.
-	const curated = JSON.parse(await readFile(CURATED, "utf8")) as CatalogFeed[];
+	const curated = JSON.parse(await readFile(CURATED, "utf8")) as SeedFeed[];
 	for (const feed of curated) {
 		byUrl.set(normalizeUrl(feed.url), feed);
 	}

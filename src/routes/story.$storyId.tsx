@@ -6,6 +6,7 @@ import {
 	Check,
 	ExternalLink,
 	Link2,
+	MessageSquare,
 	RefreshCw,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -330,12 +331,9 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 
 					<div className="flex flex-wrap items-center gap-3 pt-1">
 						<a
-							href={storyClickHref(
-								story.id,
-								"story",
-								undefined,
-								getBrowseSession(),
-							)}
+							href={storyClickHref(story.id, "story", {
+								bs: getBrowseSession(),
+							})}
 							target="_blank"
 							rel="noreferrer"
 							aria-label="Read the original article (opens in a new tab)"
@@ -344,6 +342,22 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 							Read the original
 							<ExternalLink className="size-4" aria-hidden />
 						</a>
+
+						{story.discussionUrl ? (
+							<a
+								href={storyClickHref(story.id, "story", {
+									bs: getBrowseSession(),
+									target: "discussion",
+								})}
+								target="_blank"
+								rel="noreferrer"
+								aria-label="Read the discussion (opens in a new tab)"
+								className="focus-scoop inline-flex items-center gap-2 rounded-full border border-primary px-5 py-2.5 font-semibold text-primary text-sm no-underline transition-colors hover:bg-primary/10"
+							>
+								Discussion
+								<MessageSquare className="size-4" aria-hidden />
+							</a>
+						) : null}
 
 						<SaveButton storyId={story.id} />
 

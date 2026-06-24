@@ -26,6 +26,7 @@ export type ParsedItem = {
 	content: string | null;
 	imageUrl: string | null; // representative image, or null when the feed has none
 	publishedAt: number | null; // epoch ms, or null when the feed gives no usable date
+	discussionUrl: string | null; // comments/discussion page (RSS <comments> / Atom rel="replies"), or null
 };
 
 const parser = new XMLParser({
@@ -192,30 +193,87 @@ function atomLink(link: unknown): string {
 	return text(chosen["@_href"] ?? chosen);
 }
 
+/** The href of the Atom link with the given rel (e.g. "replies"), or null. */
+function atomLinkByRel(link: unknown, rel: string): string | null {
+	const links = asArray(link) as Record<string, unknown>[];
+	const match = links.find((l) => l["@_rel"] === rel);
+	return match ? text(match["@_href"]) || null : null;
+}
+
 export class FeedError extends Error {}
+
+// Basic fetch guards: a feed that hangs or streams gigabytes shouldn't be able
+// to wedge an ingest (or a /submit request that fetches an arbitrary URL). We
+// cap the time we'll wait and the bytes we'll read — feeds are tiny, so these
+// limits are generous and only ever trip on something pathological.
+const FETCH_TIMEOUT_MS = 10_000;
+const MAX_FEED_BYTES = 5_000_000;
+
+/** Read a response body as text, aborting if it exceeds MAX_FEED_BYTES. */
+async function readCapped(res: Response): Promise<string> {
+	const declared = Number(res.headers.get("content-length"));
+	if (Number.isFinite(declared) && declared > MAX_FEED_BYTES) {
+		throw new FeedError("That feed is too large to read.");
+	}
+	if (!res.body) return res.text();
+
+	const reader = res.body.getReader();
+	const decoder = new TextDecoder();
+	let xml = "";
+	let total = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		if (!value) continue;
+		total += value.byteLength;
+		if (total > MAX_FEED_BYTES) {
+			// Guard cancel() so its own rejection can't mask the size FeedError.
+			await reader.cancel().catch(() => {});
+			throw new FeedError("That feed is too large to read.");
+		}
+		xml += decoder.decode(value, { stream: true });
+	}
+	return xml + decoder.decode();
+}
 
 /** Fetch a URL and parse it as RSS or Atom. Throws FeedError with a friendly message. */
 export async function fetchAndParseFeed(feedUrl: string): Promise<ParsedFeed> {
-	let res: Response;
+	// One timer covers the whole fetch + body read; aborting cancels both.
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+	let xml: string;
 	try {
-		res = await fetch(feedUrl, {
-			headers: {
-				// Some hosts 403 a missing UA; identify ourselves politely.
-				"user-agent": USER_AGENT,
-				accept:
-					"application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-			},
-			redirect: "follow",
-		});
-	} catch (cause) {
-		throw new FeedError(`Couldn't reach ${feedUrl}.`, { cause });
-	}
+		let res: Response;
+		try {
+			res = await fetch(feedUrl, {
+				headers: {
+					// Some hosts 403 a missing UA; identify ourselves politely.
+					"user-agent": USER_AGENT,
+					accept:
+						"application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+				},
+				redirect: "follow",
+				signal: controller.signal,
+			});
+		} catch (cause) {
+			throw new FeedError(`Couldn't reach ${feedUrl}.`, { cause });
+		}
 
-	if (!res.ok) {
-		throw new FeedError(`That feed returned ${res.status}.`);
-	}
+		if (!res.ok) {
+			throw new FeedError(`That feed returned ${res.status}.`);
+		}
 
-	const xml = await res.text();
+		try {
+			xml = await readCapped(res);
+		} catch (cause) {
+			// A size-cap trip is already a FeedError; anything else (an abort on
+			// timeout, a mid-stream network drop) reads as unreachable.
+			if (cause instanceof FeedError) throw cause;
+			throw new FeedError(`Couldn't read ${feedUrl}.`, { cause });
+		}
+	} finally {
+		clearTimeout(timer);
+	}
 
 	let doc: Record<string, unknown>;
 	try {
@@ -253,6 +311,9 @@ function parseRss(channel: Record<string, unknown>): ParsedFeed {
 				content: stripHtml(rawContent) || null,
 				imageUrl: firstImage(item, rawContent),
 				publishedAt: parseDate(item.pubDate ?? item["dc:date"]),
+				// Standard RSS 2.0 element for the item's comments page. HN's feed
+				// points this at the news.ycombinator.com/item?id= thread.
+				discussionUrl: text(item.comments) || null,
 			};
 		},
 	);
@@ -280,6 +341,8 @@ function parseRdf(rdf: Record<string, unknown>): ParsedFeed {
 				content: stripHtml(rawContent) || null,
 				imageUrl: firstImage(item, rawContent),
 				publishedAt: parseDate(item["dc:date"]),
+				// RSS 1.0 (RDF) has no standard comments element.
+				discussionUrl: null,
 			};
 		},
 	);
@@ -309,6 +372,8 @@ function parseAtom(feed: Record<string, unknown>): ParsedFeed {
 				content: stripHtml(text(entry.summary) || text(entry.content)) || null,
 				imageUrl: firstImage(entry, rawContent),
 				publishedAt: parseDate(entry.published ?? entry.updated),
+				// Atom's convention for a comments page is link rel="replies".
+				discussionUrl: atomLinkByRel(entry.link, "replies"),
 			};
 		},
 	);

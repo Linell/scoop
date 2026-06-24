@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Check, ChevronRight, Loader2, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -24,8 +25,9 @@ const MAX_RESULTS = 50;
 /**
  * Browse + search the bundled feed catalog (or paste a raw URL). With no query
  * the dialog is a short category index you drill into; typing searches across
- * every feed at once. Picking a feed runs it through the same live-ingest add
- * path, and each row tracks its own add state.
+ * every feed at once. Picking a catalog feed just follows it (it's already in
+ * the catalog); pasting a raw URL ingests it first, then follows. Each row
+ * tracks its own add state.
  *
  * Shared by the home empty-state ("Browse all flavors") and the Settings page's
  * subscription manager — both need the exact same add-a-flavor flow.
@@ -38,7 +40,7 @@ export function BrowseFlavorsDialog({
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onAdd: (url: string) => Promise<string | null>;
+	onAdd: (url: string, catalogFeed?: CatalogFeed) => Promise<string | null>;
 	isSubscribed: (id: string) => boolean;
 }) {
 	const [catalog, setCatalog] = useState<CatalogFeed[] | null>(null);
@@ -71,11 +73,11 @@ export function BrowseFlavorsDialog({
 			.slice(0, MAX_RESULTS);
 	}, [catalog, q]);
 
-	const add = async (url: string) => {
+	const add = async (url: string, catalogFeed?: CatalogFeed) => {
 		if (busy.has(url)) return;
 		setBusy((prev) => new Set(prev).add(url));
 		setError(null);
-		const err = await onAdd(url);
+		const err = await onAdd(url, catalogFeed);
 		setBusy((prev) => {
 			const next = new Set(prev);
 			next.delete(url);
@@ -98,9 +100,12 @@ export function BrowseFlavorsDialog({
 		url: feed.url,
 		title: feed.title,
 		description: feed.description,
+		iconUrl: feed.iconUrl,
 		busy: busy.has(feed.url),
 		added: isSubscribed(feedIdForUrl(feed.url)),
-		onAdd: add,
+		// Catalog picks pass their feed so the handler can follow directly
+		// without a re-fetch; the paste-URL item below passes none.
+		onAdd: (url: string) => add(url, feed),
 	});
 
 	const current = category ? groups.find((g) => g.category === category) : null;
@@ -194,6 +199,16 @@ export function BrowseFlavorsDialog({
 					</CommandGroup>
 				)}
 			</CommandList>
+			<div className="border-border border-t px-4 py-2.5 text-center text-cocoa-soft text-xs">
+				Don't see a feed?{" "}
+				<Link
+					to="/submit"
+					onClick={() => handleOpenChange(false)}
+					className="focus-scoop rounded-sm font-semibold text-strawberry-ink underline underline-offset-4"
+				>
+					Submit it
+				</Link>
+			</div>
 		</CommandDialog>
 	);
 }
@@ -221,6 +236,7 @@ function FeedRow({
 	title,
 	description,
 	meta,
+	iconUrl,
 	busy,
 	added,
 	onAdd,
@@ -229,6 +245,7 @@ function FeedRow({
 	title: string;
 	description: string | null;
 	meta?: string;
+	iconUrl?: string | null;
 	busy: boolean;
 	added: boolean;
 	onAdd: (url: string) => void;
@@ -241,6 +258,19 @@ function FeedRow({
 		>
 			<div className="flex min-w-0 flex-col gap-0.5">
 				<div className="flex min-w-0 items-center gap-2">
+					{iconUrl ? (
+						<img
+							src={iconUrl}
+							alt=""
+							width={16}
+							height={16}
+							loading="lazy"
+							className="size-4 shrink-0 rounded-sm"
+							onError={(e) => {
+								e.currentTarget.style.display = "none";
+							}}
+						/>
+					) : null}
 					<span className="truncate text-foreground">{title}</span>
 					{meta ? (
 						<span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground uppercase tracking-wide">

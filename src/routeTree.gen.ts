@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SubmitRouteImport } from './routes/submit'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as ChatRouteImport } from './routes/chat'
@@ -18,7 +19,14 @@ import { Route as StoryStoryIdRouteImport } from './routes/story.$storyId'
 import { Route as RStoryIdRouteImport } from './routes/r.$storyId'
 import { Route as LSlugRouteImport } from './routes/l.$slug'
 import { Route as ApiInngestRouteImport } from './routes/api/inngest'
+import { Route as ApiFeedsRouteImport } from './routes/api/feeds'
+import { Route as ApiFeedsOpmlRouteImport } from './routes/api/feeds.opml'
 
+const SubmitRoute = SubmitRouteImport.update({
+  id: '/submit',
+  path: '/submit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -64,6 +72,16 @@ const ApiInngestRoute = ApiInngestRouteImport.update({
   path: '/api/inngest',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiFeedsRoute = ApiFeedsRouteImport.update({
+  id: '/api/feeds',
+  path: '/api/feeds',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiFeedsOpmlRoute = ApiFeedsOpmlRouteImport.update({
+  id: '/opml',
+  path: '/opml',
+  getParentRoute: () => ApiFeedsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -71,10 +89,13 @@ export interface FileRoutesByFullPath {
   '/chat': typeof ChatRoute
   '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
+  '/submit': typeof SubmitRoute
+  '/api/feeds': typeof ApiFeedsRouteWithChildren
   '/api/inngest': typeof ApiInngestRoute
   '/l/$slug': typeof LSlugRoute
   '/r/$storyId': typeof RStoryIdRoute
   '/story/$storyId': typeof StoryStoryIdRoute
+  '/api/feeds/opml': typeof ApiFeedsOpmlRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -82,10 +103,13 @@ export interface FileRoutesByTo {
   '/chat': typeof ChatRoute
   '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
+  '/submit': typeof SubmitRoute
+  '/api/feeds': typeof ApiFeedsRouteWithChildren
   '/api/inngest': typeof ApiInngestRoute
   '/l/$slug': typeof LSlugRoute
   '/r/$storyId': typeof RStoryIdRoute
   '/story/$storyId': typeof StoryStoryIdRoute
+  '/api/feeds/opml': typeof ApiFeedsOpmlRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -94,10 +118,13 @@ export interface FileRoutesById {
   '/chat': typeof ChatRoute
   '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
+  '/submit': typeof SubmitRoute
+  '/api/feeds': typeof ApiFeedsRouteWithChildren
   '/api/inngest': typeof ApiInngestRoute
   '/l/$slug': typeof LSlugRoute
   '/r/$storyId': typeof RStoryIdRoute
   '/story/$storyId': typeof StoryStoryIdRoute
+  '/api/feeds/opml': typeof ApiFeedsOpmlRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -107,10 +134,13 @@ export interface FileRouteTypes {
     | '/chat'
     | '/saved'
     | '/settings'
+    | '/submit'
+    | '/api/feeds'
     | '/api/inngest'
     | '/l/$slug'
     | '/r/$storyId'
     | '/story/$storyId'
+    | '/api/feeds/opml'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -118,10 +148,13 @@ export interface FileRouteTypes {
     | '/chat'
     | '/saved'
     | '/settings'
+    | '/submit'
+    | '/api/feeds'
     | '/api/inngest'
     | '/l/$slug'
     | '/r/$storyId'
     | '/story/$storyId'
+    | '/api/feeds/opml'
   id:
     | '__root__'
     | '/'
@@ -129,10 +162,13 @@ export interface FileRouteTypes {
     | '/chat'
     | '/saved'
     | '/settings'
+    | '/submit'
+    | '/api/feeds'
     | '/api/inngest'
     | '/l/$slug'
     | '/r/$storyId'
     | '/story/$storyId'
+    | '/api/feeds/opml'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -141,6 +177,8 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRoute
   SavedRoute: typeof SavedRoute
   SettingsRoute: typeof SettingsRoute
+  SubmitRoute: typeof SubmitRoute
+  ApiFeedsRoute: typeof ApiFeedsRouteWithChildren
   ApiInngestRoute: typeof ApiInngestRoute
   LSlugRoute: typeof LSlugRoute
   RStoryIdRoute: typeof RStoryIdRoute
@@ -149,6 +187,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/submit': {
+      id: '/submit'
+      path: '/submit'
+      fullPath: '/submit'
+      preLoaderRoute: typeof SubmitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -212,8 +257,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInngestRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/feeds': {
+      id: '/api/feeds'
+      path: '/api/feeds'
+      fullPath: '/api/feeds'
+      preLoaderRoute: typeof ApiFeedsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/feeds/opml': {
+      id: '/api/feeds/opml'
+      path: '/opml'
+      fullPath: '/api/feeds/opml'
+      preLoaderRoute: typeof ApiFeedsOpmlRouteImport
+      parentRoute: typeof ApiFeedsRoute
+    }
   }
 }
+
+interface ApiFeedsRouteChildren {
+  ApiFeedsOpmlRoute: typeof ApiFeedsOpmlRoute
+}
+
+const ApiFeedsRouteChildren: ApiFeedsRouteChildren = {
+  ApiFeedsOpmlRoute: ApiFeedsOpmlRoute,
+}
+
+const ApiFeedsRouteWithChildren = ApiFeedsRoute._addFileChildren(
+  ApiFeedsRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -221,6 +292,8 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRoute,
   SavedRoute: SavedRoute,
   SettingsRoute: SettingsRoute,
+  SubmitRoute: SubmitRoute,
+  ApiFeedsRoute: ApiFeedsRouteWithChildren,
   ApiInngestRoute: ApiInngestRoute,
   LSlugRoute: LSlugRoute,
   RStoryIdRoute: RStoryIdRoute,

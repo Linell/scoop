@@ -1,10 +1,16 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Bookmark, BookmarkCheck } from "lucide-react";
+import {
+	ArrowRight,
+	Bookmark,
+	BookmarkCheck,
+	MessageSquare,
+} from "lucide-react";
 import { LeadImage } from "#/components/lead-image";
 import type { FeedView } from "#/lib/feed-view";
 import { getBrowseSession } from "#/lib/session";
 import { relativeTime } from "#/lib/time";
 import type { Feed, Story } from "#/lib/types";
+import { storyClickHref } from "#/lib/url";
 import { recordStoryOpen } from "#/server/feeds";
 
 /**
@@ -56,6 +62,25 @@ export function ScoopCard({
 					<Bookmark className="size-4" aria-hidden />
 				)}
 			</button>
+
+			{/* A second floated sibling (like the bookmark): an <a> can't nest inside
+			    the card's <Link>, so a story with a discussion/comments page gets its
+			    Discussion link floated over the card rather than as a descendant. */}
+			{story.discussionUrl ? (
+				<a
+					href={storyClickHref(story.id, "feed", {
+						bs: getBrowseSession(),
+						target: "discussion",
+					})}
+					target="_blank"
+					rel="noreferrer"
+					aria-label="Read the discussion (opens in a new tab)"
+					className="focus-scoop absolute right-2.5 bottom-2.5 z-10 inline-flex items-center gap-1.5 rounded-full bg-card/80 px-3 py-1.5 font-semibold text-cocoa-soft text-xs no-underline shadow-sm backdrop-blur-sm transition-colors hover:text-strawberry-ink"
+				>
+					<MessageSquare className="size-3.5" aria-hidden />
+					Discussion
+				</a>
+			) : null}
 
 			<Link
 				to="/story/$storyId"

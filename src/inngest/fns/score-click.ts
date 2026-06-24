@@ -10,8 +10,9 @@ import { storyClicked } from "../events";
  *
  * The count is emitted as a per-variant experiment score — a magnitude (avg per
  * run on the summary-strategy dashboard) — split by what the reader did:
- * `opens` (viewed the in-app show page, weak) vs `clickthroughs` (clicked out to
- * the original article, the strong teaser signal). Like the rating path this is
+ * `opens` (viewed the in-app show page, weak), `clickthroughs` (clicked out to
+ * the original article, the strong teaser signal), or `discussions` (clicked out
+ * to the comments page — wanting the conversation). Like the rating path this is
  * a parentless run, so attribution flows through the summarize run id persisted
  * on the story (`runId`) plus its served variant. The increment is memoized in a
  * step so a retry can't double-count.
@@ -30,7 +31,12 @@ export const scoreClick = inngest.createFunction(
 		// click but skip scoring. Mirrors the rating path's guard.
 		if (story?.servedVariant && story.experimentName && story.summarizeRunId) {
 			await inngest.score.experiment({
-				name: action === "open" ? "opens" : "clickthroughs",
+				name:
+					action === "open"
+						? "opens"
+						: action === "discussion"
+							? "discussions"
+							: "clickthroughs",
 				value: count,
 				experiment: {
 					experimentName: story.experimentName,
