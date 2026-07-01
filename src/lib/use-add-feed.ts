@@ -12,9 +12,10 @@ import { feedIdForUrl } from "./url.ts";
  *    server-side subscription and triggers ingest); a pasted URL falls through
  *    to `addByUrl`, which ingests the brand-new feed first.
  *
- * `subscribe` is passed in (callers already hold it from useSubscriptions), so
- * this hook stays free of subscription state. The server fn is lazy-imported so
- * this lib never statically pulls the server graph into the client bundle.
+ * `subscribe` is passed in (callers already hold their own subscription state
+ * and mutator), so this hook stays free of subscription state itself. The
+ * server fn is lazy-imported so this lib never statically pulls the server
+ * graph into the client bundle.
  */
 export function useAddFeed(subscribe: (id: string) => void) {
 	const addByUrl = useCallback(

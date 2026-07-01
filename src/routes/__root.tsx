@@ -1,8 +1,15 @@
 import { TanStackDevtools } from "@tanstack/react-devtools";
-import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import {
+	createRootRouteWithContext,
+	HeadContent,
+	Scripts,
+} from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
+import { ImportLocalState } from "#/components/import-local-state";
 import { SiteHeader } from "#/components/site-header";
+import type { Session } from "#/lib/auth";
+import { resolveSession } from "#/server/session";
 import appCss from "../styles.css?url";
 
 /** Canonical origin, used to build absolute URLs for social-share meta tags. */
@@ -14,7 +21,11 @@ const favicon =
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M9 16 L16 30 L23 16 Z" fill="#ff9d52" stroke="#4a3640" stroke-width="1.4" stroke-linejoin="round"/><circle cx="16" cy="11" r="8" fill="#ff93b3" stroke="#4a3640" stroke-width="1.4"/><circle cx="12.7" cy="10.3" r="1.4" fill="#4a3640"/><circle cx="19.3" cy="10.3" r="1.4" fill="#4a3640"/><path d="M12.5 13.2 Q16 16.2 19.5 13.2" stroke="#4a3640" stroke-width="1.7" stroke-linecap="round" fill="none"/></svg>`,
 	);
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ user: Session | null }>()({
+	// Resolves once per route-tree evaluation (including client-side nav) — the
+	// session is cheap to look up (KV-cached in getSession) and every route below
+	// needs to know who's asking, so this isn't worth caching further here.
+	beforeLoad: async () => ({ user: await resolveSession() }),
 	head: () => ({
 		meta: [
 			{
@@ -94,6 +105,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				</a>
 				<SiteHeader />
 				{children}
+				<ImportLocalState />
 				<TanStackDevtools
 					config={{
 						position: "bottom-right",

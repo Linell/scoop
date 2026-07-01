@@ -5,14 +5,23 @@
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
   "observability": { "enabled": true },
-  // Shared, deduped catalog of feeds + stories. Per-user subscriptions live in
-  // localStorage (no auth), so this DB is global and append-mostly.
+  // Shared, deduped catalog of feeds + stories, plus per-user accounts
+  // (subscriptions/saved stories) now that voodoo backs real sessions.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "scoop",
       "database_id": "86a02bd6-6d45-40a1-a456-e658127d5bd1",
       "migrations_dir": "migrations"
+    }
+  ],
+  // Caches voodoo /me lookups so every server fn doesn't round-trip to the auth
+  // service.
+  "kv_namespaces": [
+    {
+      "binding": "SESSION_CACHE",
+      "id": "6a6ee7bc1f604027a834fba608d75287",
+      "preview_id": "647bd48d639041a1884bc1f9cf6f44e9"
     }
   ]
 }

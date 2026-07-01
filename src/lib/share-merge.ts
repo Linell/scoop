@@ -1,5 +1,16 @@
 import { type Collection, childrenOf, descendantsOf } from "./collections";
-import type { SavedStory } from "./saved";
+
+/**
+ * A saved story's shape as far as the merge is concerned — the same fields
+ * saved.ts's local store used to own, now equally the shape of a server-backed
+ * saved entry (see #/server/db.ts's user_saved_stories rows). Kept local to
+ * this module since share-merge only needs the shape, not a store.
+ */
+export type SavedStory = {
+	storyId: string;
+	savedAt: number;
+	collections: string[];
+};
 
 /**
  * Publishing a collection — and importing one someone shared — is a best-effort

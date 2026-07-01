@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import {
 	ArrowRight,
 	Bookmark,
@@ -17,28 +17,49 @@ import { ScoopLogo } from "#/components/scoop-logo";
 import { ShareDialog } from "#/components/share-dialog";
 import { Button } from "#/components/ui/button";
 import { Skeleton } from "#/components/ui/skeleton";
-import { getClientId } from "#/lib/client-id";
+import { voodooLoginUrl } from "#/lib/auth";
 import {
 	type Collection,
 	childrenOf,
 	descendantsOf,
 	roots,
-	useReadingList,
+	useCollections,
 } from "#/lib/collections";
 import { useFeedView } from "#/lib/feed-view";
-import { flavorForFeed } from "#/lib/flavor";
-import { getBrowseSession } from "#/lib/session";
+import { FLAVORS, flavorForFeed } from "#/lib/flavor";
 import { buildShareStructure } from "#/lib/share-merge";
-import { FLAVORS } from "#/lib/subscriptions";
 import type { Feed, Story } from "#/lib/types";
 import {
 	createList,
 	getFeeds,
+	getMySavedEntries,
 	getSavedStories,
 	recordStorySave,
+	removeStorySave,
+	updateSavedCollections,
 } from "#/server/feeds";
 
-export const Route = createFileRoute("/saved")({ component: SavedPage });
+export const Route = createFileRoute("/saved")({
+	beforeLoad: ({ context, location }) => {
+		if (!context.user) {
+			throw redirect({ href: voodooLoginUrl(location.href) });
+		}
+	},
+	loader: async () => {
+		const [entries, stories] = await Promise.all([
+			getMySavedEntries(),
+			getSavedStories(),
+		]);
+		const feedIds = [...new Set(stories.map((s) => s.feedId))];
+		const feeds = feedIds.length ? await getFeeds({ data: feedIds }) : [];
+		return { entries, stories, feeds };
+	},
+	component: SavedPage,
+});
+
+/** A saved story's local membership record — mirrors the server row shape
+ *  (server/db.ts's user_saved_stories), minus the story payload itself. */
+type SavedEntry = { storyId: string; savedAt: number; collections: string[] };
 
 /**
  * A collection laid out as a flattened tree row: the node plus its depth, so the
@@ -61,33 +82,27 @@ function flattenTree(collections: Collection[]): TreeRow[] {
 }
 
 function SavedPage() {
-	// One joined instance of both stores (each createLocalStore hook keeps its own
-	// React state per call, so the page must go through a single instance) plus
-	// the composed cross-store delete that keeps them from desyncing.
 	const {
-		collections: collectionsStore,
-		saved: savedStore,
-		deleteCollection,
-	} = useReadingList();
-	const {
-		saved,
-		hydrated: savedHydrated,
-		isSaved,
-		toggle,
-		addToCollection,
-		removeFromCollection,
-	} = savedStore;
+		entries: initialEntries,
+		stories: initialStories,
+		feeds: initialFeeds,
+	} = Route.useLoaderData();
+
+	// The collection tree is still a local (per-browser) concept — see
+	// collections.ts — but the saved stories themselves (and their per-story
+	// `collections` tags) are server rows now, seeded from the loader.
 	const {
 		collections,
 		hydrated: collectionsHydrated,
 		create,
 		rename,
-	} = collectionsStore;
-	const { view } = useFeedView();
+		remove,
+	} = useCollections();
 
-	const [stories, setStories] = useState<Story[]>([]);
-	const [feeds, setFeeds] = useState<Feed[]>([]);
-	const [loading, setLoading] = useState(false);
+	const [saved, setSaved] = useState<SavedEntry[]>(initialEntries);
+	const [stories, setStories] = useState<Story[]>(initialStories);
+	const [feeds, setFeeds] = useState<Feed[]>(initialFeeds);
+	const { view } = useFeedView();
 
 	// Which collection the grid is focused on. null = "All saved". Local state —
 	// a transient view choice, no need to survive reloads.
@@ -95,7 +110,33 @@ function SavedPage() {
 	// The collection whose share dialog is open (its name titles the link).
 	const [shareCol, setShareCol] = useState<Collection | null>(null);
 
-	const hydrated = savedHydrated && collectionsHydrated;
+	const isSaved = useCallback(
+		(id: string) => saved.some((s) => s.storyId === id),
+		[saved],
+	);
+
+	// Delete a collection: drop the folder (re-parenting its children) locally,
+	// and strip its tag off every saved story server-side so the two never desync.
+	const deleteCollection = useCallback(
+		(id: string) => {
+			remove(id);
+			const affected = saved.filter((s) => s.collections.includes(id));
+			setSaved((prev) =>
+				prev.map((s) =>
+					s.collections.includes(id)
+						? { ...s, collections: s.collections.filter((c) => c !== id) }
+						: s,
+				),
+			);
+			for (const s of affected) {
+				const next = s.collections.filter((c) => c !== id);
+				updateSavedCollections({
+					data: { storyId: s.storyId, collections: next },
+				}).catch(() => {});
+			}
+		},
+		[remove, saved],
+	);
 
 	// Saved ids, newest-first — the order the grid renders in.
 	const ids = useMemo(
@@ -104,32 +145,29 @@ function SavedPage() {
 		[saved],
 	);
 
-	// Hydrate the saved stories (and the feeds they belong to, for card titles)
-	// whenever the saved set changes. Mirrors the home feed's fetch dance.
+	// Refresh the saved stories (and the feeds they belong to) if `saved` ever
+	// names an id we don't have hydrated — every save on this page toggles an
+	// already-rendered story, so in practice this only guards the rare case of a
+	// save landing from elsewhere. Tracks the missing-id set it already tried so a
+	// story that genuinely can't be resolved doesn't refetch every render.
+	const triedMissing = useRef<string>("");
 	useEffect(() => {
-		if (!savedHydrated) return;
-		if (ids.length === 0) {
-			setStories([]);
-			setFeeds([]);
-			return;
-		}
+		const missing = ids.filter((id) => !stories.some((s) => s.id === id));
+		const key = missing.join(",");
+		if (missing.length === 0 || key === triedMissing.current) return;
+		triedMissing.current = key;
 		let cancelled = false;
-		setLoading(true);
-		getSavedStories({ data: ids })
-			.then(async (s) => {
-				if (cancelled) return;
-				setStories(s);
-				const feedIds = [...new Set(s.map((story) => story.feedId))];
-				const f = feedIds.length ? await getFeeds({ data: feedIds }) : [];
-				if (!cancelled) setFeeds(f);
-			})
-			.finally(() => {
-				if (!cancelled) setLoading(false);
-			});
+		getSavedStories().then(async (s) => {
+			if (cancelled) return;
+			setStories(s);
+			const feedIds = [...new Set(s.map((story) => story.feedId))];
+			const f = feedIds.length ? await getFeeds({ data: feedIds }) : [];
+			if (!cancelled) setFeeds(f);
+		});
 		return () => {
 			cancelled = true;
 		};
-	}, [ids, savedHydrated]);
+	}, [ids, stories]);
 
 	const feedById = useMemo(() => new Map(feeds.map((f) => [f.id, f])), [feeds]);
 	const storyById = useMemo(
@@ -185,24 +223,79 @@ function SavedPage() {
 	savedRef.current = saved;
 
 	// Save handler shared by every card on this page (see ScoopCard, now
-	// presentational). On a transition INTO saved, fire the durable save signal
-	// best-effort; unsaving is purely local.
+	// presentational). Saving/unsaving are both durable server writes now — no
+	// more purely-local unsave.
 	const onToggleSave = useCallback(
 		(storyId: string) => {
 			const wasSaved = isSaved(storyId);
-			toggle(storyId);
-			if (!wasSaved) {
-				recordStorySave({
-					data: {
-						storyId,
-						browseSession: getBrowseSession(),
-						clientId: getClientId(),
-					},
-				}).catch(() => {});
+			if (wasSaved) {
+				const removed = savedRef.current.find((s) => s.storyId === storyId);
+				setSaved((prev) => prev.filter((s) => s.storyId !== storyId));
+				removeStorySave({ data: storyId }).catch(() => {
+					if (removed) setSaved((prev) => [...prev, removed]);
+				});
+			} else {
+				setSaved((prev) => [
+					...prev,
+					{ storyId, savedAt: Date.now(), collections: [] },
+				]);
+				recordStorySave({ data: { storyId } }).catch(() => {
+					setSaved((prev) => prev.filter((s) => s.storyId !== storyId));
+				});
 			}
 		},
-		[isSaved, toggle],
+		[isSaved],
 	);
+
+	// Add/remove a saved story's collection tag, optimistically, then persist the
+	// full membership array server-side (updateSavedCollections overwrites it).
+	const addToCollection = useCallback((storyId: string, colId: string) => {
+		const prevEntry = savedRef.current.find((s) => s.storyId === storyId);
+		setSaved((prev) => {
+			const next = prev.map((s) =>
+				s.storyId === storyId && !s.collections.includes(colId)
+					? { ...s, collections: [...s.collections, colId] }
+					: s,
+			);
+			const entry = next.find((s) => s.storyId === storyId);
+			if (entry) {
+				updateSavedCollections({
+					data: { storyId, collections: entry.collections },
+				}).catch(() => {
+					if (prevEntry) {
+						setSaved((cur) =>
+							cur.map((s) => (s.storyId === storyId ? prevEntry : s)),
+						);
+					}
+				});
+			}
+			return next;
+		});
+	}, []);
+
+	const removeFromCollection = useCallback((storyId: string, colId: string) => {
+		const prevEntry = savedRef.current.find((s) => s.storyId === storyId);
+		setSaved((prev) => {
+			const next = prev.map((s) =>
+				s.storyId === storyId
+					? { ...s, collections: s.collections.filter((c) => c !== colId) }
+					: s,
+			);
+			const entry = next.find((s) => s.storyId === storyId);
+			if (entry) {
+				updateSavedCollections({
+					data: { storyId, collections: entry.collections },
+				}).catch(() => {
+					if (prevEntry) {
+						setSaved((cur) =>
+							cur.map((s) => (s.storyId === storyId ? prevEntry : s)),
+						);
+					}
+				});
+			}
+			return next;
+		});
+	}, []);
 
 	// Publish the focused (or share-targeted) collection's subtree as a shared
 	// stories list and resolve to its /l/<slug> link. Memoized on the share
@@ -222,14 +315,13 @@ function SavedPage() {
 				kind: "stories",
 				title: shareCol.name,
 				ids: storyIds,
-				clientId: getClientId(),
 				structure: JSON.stringify(structure),
 			},
 		});
 		return `${window.location.origin}/l/${slug}`;
 	}, [shareCol]);
 
-	const showSkeletons = !hydrated || (loading && stories.length === 0);
+	const showSkeletons = !collectionsHydrated;
 
 	return (
 		<main id="main-content" className="mx-auto w-full max-w-6xl px-4 pb-24">
@@ -246,32 +338,30 @@ function SavedPage() {
 					<div className="flex items-center justify-between">
 						<h2 className="kicker">Your collections</h2>
 						<span className="text-xs text-cocoa-soft">
-							{hydrated ? collections.length : ""}
+							{collectionsHydrated ? collections.length : ""}
 						</span>
 					</div>
 
-					{!hydrated ? (
+					{!collectionsHydrated ? (
 						<CollectionListSkeleton />
 					) : (
 						<CollectionTree
 							tree={tree}
-							saved={saved}
+							savedCount={saved.length}
 							activeId={activeId}
 							onSelect={setActiveId}
 							onCreate={create}
 							onRename={rename}
 							onDelete={(id) => {
-								// One composed op drops the folder (re-parenting its
-								// children) AND strips its tag off every saved story.
-								deleteCollection(id);
 								if (activeId === id) setActiveId(null);
+								deleteCollection(id);
 							}}
 							onShare={(c) => setShareCol(c)}
 						/>
 					)}
 
 					<NewCollectionButton
-						hydrated={hydrated}
+						hydrated={collectionsHydrated}
 						parent={activeCollection}
 						onCreate={(name, parent) => setActiveId(create(name, parent))}
 					/>
@@ -279,7 +369,7 @@ function SavedPage() {
 
 				{/* The grid */}
 				<section>
-					{hydrated && activeCollection ? (
+					{collectionsHydrated && activeCollection ? (
 						<div className="mb-4 flex items-center gap-2">
 							<button
 								type="button"
@@ -557,7 +647,7 @@ function CollectionMenu({
 /** The sidebar tree: "All saved" + each collection row, with row affordances. */
 function CollectionTree({
 	tree,
-	saved,
+	savedCount,
 	activeId,
 	onSelect,
 	onRename,
@@ -565,7 +655,7 @@ function CollectionTree({
 	onShare,
 }: {
 	tree: TreeRow[];
-	saved: import("#/lib/saved").SavedStory[];
+	savedCount: number;
 	activeId: string | null;
 	onSelect: (id: string | null) => void;
 	onCreate: (name: string, parent?: string | null) => string;
@@ -594,7 +684,7 @@ function CollectionTree({
 					/>
 					<span className="truncate">All saved</span>
 					<span className="ml-auto shrink-0 text-cocoa-soft text-xs">
-						{saved.length}
+						{savedCount}
 					</span>
 				</button>
 			</li>

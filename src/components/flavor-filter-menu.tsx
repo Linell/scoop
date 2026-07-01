@@ -8,7 +8,7 @@ import {
 	CommandItem,
 	CommandList,
 } from "#/components/ui/command";
-import type { Subscription } from "#/lib/subscriptions";
+import type { Subscription } from "#/lib/flavor";
 import type { Feed } from "#/lib/types";
 
 /**

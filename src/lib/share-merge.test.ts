@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Collection } from "#/lib/collections";
-import type { SavedStory } from "#/lib/saved";
 import {
 	mergeSharedCollection,
 	parseShareStructure,
+	type SavedStory,
 	type ShareStructure,
 } from "#/lib/share-merge";
 

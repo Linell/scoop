@@ -1,16 +1,17 @@
 import { useCallback } from "react";
+import { FLAVORS } from "./flavor";
 import { createLocalStore } from "./local-store";
-import { useSaved } from "./saved";
-import { FLAVORS } from "./subscriptions";
 
 /**
  * Collections are the reader's own hierarchy over their reading list — nested
  * folders ("lists") that a saved story can belong to in many places at once.
- * Like subscriptions and the saved list, they live entirely in localStorage
- * (no auth, no server). Membership itself isn't stored here; it lives on each
- * SavedStory's `collections` array (see saved.ts). This module is just the tree
- * of folders: a flat array of nodes, each pointing at its parent (or null at a
- * root), with a stable flavor color so a collection keeps its look.
+ * Unlike saved stories (now server-backed rows, see #/server/feeds and
+ * #/server/db's user_saved_stories table), the folder tree itself has no
+ * server table and stays in localStorage, per browser. Membership isn't stored
+ * here; it lives on each saved story's own `collections` array, mutated via the
+ * updateSavedCollections server fn. This module is just the tree of folders: a
+ * flat array of nodes, each pointing at its parent (or null at a root), with a
+ * stable flavor color so a collection keeps its look.
  */
 
 const STORAGE_KEY = "scoop.collections.v1";
@@ -119,8 +120,8 @@ export function useCollections() {
 	 * Remove a collection, re-parenting its direct children onto the removed
 	 * node's parent so the tree stays connected. We deliberately do NOT
 	 * cascade-delete descendants — a reader deleting a folder shouldn't lose the
-	 * sub-folders nested inside it. (Stripping the id off saved stories is the
-	 * caller's job; see saved.stripCollection.)
+	 * sub-folders nested inside it. Stripping the id off every saved story's
+	 * server-side membership is the caller's job (see saved.tsx's deleteCollection).
 	 */
 	const remove = useCallback(
 		(id: string) => {
@@ -168,32 +169,4 @@ export function useCollections() {
 		reparent,
 		replaceAll,
 	};
-}
-
-/**
- * The reading list as a whole: the collections tree and the saved stores joined
- * at one point, so the operations that must touch BOTH can't be split. Each
- * createLocalStore hook holds its own React state per call site, so a page must
- * go through a single instance of each — this hook is that instance. It spreads
- * both surfaces through and adds the composed cross-store ops on top.
- *
- * `deleteCollection`, in particular, must drop the folder AND strip its tag off
- * every saved story; doing only one desyncs the stores (an orphaned colId tag),
- * which is exactly the bug a single composed op prevents.
- */
-export function useReadingList() {
-	const collections = useCollections();
-	const saved = useSaved();
-
-	/** Delete a collection across both stores: drop the folder (re-parenting its
-	 * children) and strip its tag off every saved story. */
-	const deleteCollection = useCallback(
-		(id: string) => {
-			collections.remove(id);
-			saved.stripCollection(id);
-		},
-		[collections.remove, saved.stripCollection],
-	);
-
-	return { collections, saved, deleteCollection };
 }

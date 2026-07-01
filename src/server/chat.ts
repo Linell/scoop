@@ -2,7 +2,11 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createServerFn } from "@tanstack/react-start";
 import { type ChatCitation, storyToCitation } from "#/lib/citation";
 import type { Feed, Story } from "#/lib/types";
-import { getFeedsByIds, getStoriesByFeedIds } from "#/server/db";
+import {
+	getFeedsByIds,
+	getPopularStories,
+	getStoriesByFeedIds,
+} from "#/server/db";
 import { MAX_FEED_IDS } from "#/server/feeds";
 import { anthropic, MODELS } from "#/server/llm";
 
@@ -110,25 +114,33 @@ function renderCatalog(
 		.join("\n\n");
 }
 
-const noFeeds: ChatReply = {
+const noStories: ChatReply = {
 	reply:
 		"You haven't added any flavors yet. Subscribe to a feed or two and I can tell you what's worth reading.",
 	citations: [],
 };
 
-/** Answer a question about the reader's feeds, with stories worth opening. */
+/**
+ * Answer a question about the reader's feeds, with stories worth opening. With
+ * no subscriptions (or no session yet), falls back to the catalog's most
+ * popular stories rather than refusing outright — a visitor who hasn't
+ * followed anything yet still gets a real answer.
+ */
 export const askScoop = createServerFn({ method: "POST" })
 	.validator(validate)
 	.handler(async ({ data: { turns, feedIds } }): Promise<ChatReply> => {
-		if (feedIds.length === 0 || turns.length === 0) return noFeeds;
+		if (turns.length === 0) return noStories;
 
-		const [feeds, allStories] = await Promise.all([
-			getFeedsByIds(feedIds),
-			getStoriesByFeedIds(feedIds),
-		]);
+		const allStories =
+			feedIds.length > 0
+				? await getStoriesByFeedIds(feedIds)
+				: await getPopularStories();
 		const stories = allStories.slice(0, MAX_STORIES);
-		if (stories.length === 0) return noFeeds;
+		if (stories.length === 0) return noStories;
 
+		const feeds = await getFeedsByIds([
+			...new Set(stories.map((s) => s.feedId)),
+		]);
 		const titleByFeed = new Map(feeds.map((f: Feed) => [f.id, f.title]));
 		const feedTitle = (id: string) => titleByFeed.get(id) ?? "a feed";
 

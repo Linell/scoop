@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import {
 	Check,
 	ImageIcon,
@@ -14,51 +14,88 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowseFlavorsDialog } from "#/components/browse-flavors-dialog";
 import { ShareDialog } from "#/components/share-dialog";
 import { Button } from "#/components/ui/button";
-import { getClientId } from "#/lib/client-id";
+import { voodooLoginUrl } from "#/lib/auth";
 import { type FeedView, useFeedView } from "#/lib/feed-view";
-import { type Subscription, useSubscriptions } from "#/lib/subscriptions";
+import type { Subscription } from "#/lib/flavor";
+import { FLAVORS } from "#/lib/flavor";
 import type { Feed } from "#/lib/types";
 import { useAddFeed } from "#/lib/use-add-feed";
-import { createList, getFeeds } from "#/server/feeds";
+import {
+	createList,
+	getFeeds,
+	getMySubscriptions,
+	subscribeFeed,
+	unsubscribeFeed,
+} from "#/server/feeds";
 
-export const Route = createFileRoute("/settings")({ component: Settings });
+export const Route = createFileRoute("/settings")({
+	beforeLoad: ({ context, location }) => {
+		if (!context.user) {
+			throw redirect({ href: voodooLoginUrl(location.href) });
+		}
+	},
+	loader: async () => {
+		const subs = await getMySubscriptions();
+		const feeds = await getFeeds({ data: subs.map((s) => s.feedId) });
+		return { subs, feeds };
+	},
+	component: Settings,
+});
 
 function Settings() {
-	const {
-		subscriptions,
-		hydrated,
-		subscribe,
-		unsubscribe,
-		restore,
-		isSubscribed,
-		clear,
-	} = useSubscriptions();
+	const { subs, feeds: initialFeeds } = Route.useLoaderData();
+
+	// Local mirror of the server-backed subscription list, so follow/unfollow
+	// feels instant — mutations still round-trip through subscribeFeed/
+	// unsubscribeFeed underneath. Seeded from the loader, not localStorage.
+	const [subscriptions, setSubscriptions] = useState<Subscription[]>(() =>
+		subs.map((s) => ({ id: s.feedId, flavor: s.flavor })),
+	);
+	const [feeds, setFeeds] = useState<Feed[]>(initialFeeds);
 	const { view, hydrated: viewHydrated, setView } = useFeedView();
 
-	const [feeds, setFeeds] = useState<Feed[]>([]);
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [shareOpen, setShareOpen] = useState(false);
+	const [clearing, setClearing] = useState(false);
 	const [cleared, setCleared] = useState(false);
 
 	const ids = useMemo(() => subscriptions.map((s) => s.id), [subscriptions]);
 	const feedById = useMemo(() => new Map(feeds.map((f) => [f.id, f])), [feeds]);
 
-	// Pull feed records (for titles) whenever the subscription set changes — the
-	// same effect the home page runs, minus the stories.
+	// Pull any feed records the current subscription set is missing titles for
+	// (e.g. right after a fresh follow). The loader already seeded the initial set.
 	useEffect(() => {
-		if (!hydrated) return;
-		if (ids.length === 0) {
-			setFeeds([]);
-			return;
-		}
+		const missing = ids.filter((id) => !feedById.has(id));
+		if (missing.length === 0) return;
 		let cancelled = false;
-		getFeeds({ data: ids }).then((f) => {
-			if (!cancelled) setFeeds(f);
+		getFeeds({ data: missing }).then((fresh) => {
+			if (!cancelled && fresh.length > 0) {
+				setFeeds((prev) => [...prev, ...fresh]);
+			}
 		});
 		return () => {
 			cancelled = true;
 		};
-	}, [ids, hydrated]);
+	}, [ids, feedById]);
+
+	const isSubscribed = useCallback(
+		(id: string) => subscriptions.some((s) => s.id === id),
+		[subscriptions],
+	);
+
+	const subscribe = useCallback(
+		(id: string) => {
+			if (isSubscribed(id)) return;
+			const flavor = FLAVORS[subscriptions.length % FLAVORS.length];
+			setSubscriptions((prev) =>
+				prev.some((s) => s.id === id) ? prev : [...prev, { id, flavor }],
+			);
+			subscribeFeed({ data: { feedId: id, flavor } }).catch(() => {
+				setSubscriptions((prev) => prev.filter((s) => s.id !== id));
+			});
+		},
+		[isSubscribed, subscriptions.length],
+	);
 
 	// The browse dialog's combined catalog-pick / paste-URL follow handler.
 	const { onDialogAdd } = useAddFeed(subscribe);
@@ -74,20 +111,40 @@ function Settings() {
 
 	const unfollow = useCallback(
 		(id: string) => {
-			const removed = unsubscribe(id);
-			if (!removed) return;
+			const index = subscriptions.findIndex((s) => s.id === id);
+			if (index === -1) return;
+			const sub = subscriptions[index];
+			setSubscriptions((prev) => prev.filter((s) => s.id !== id));
+			unsubscribeFeed({ data: { feedId: id } }).catch(() => {
+				setSubscriptions((prev) => {
+					if (prev.some((s) => s.id === sub.id)) return prev;
+					const next = [...prev];
+					next.splice(Math.min(index, next.length), 0, sub);
+					return next;
+				});
+			});
 			const title = feedById.get(id)?.title ?? "that flavor";
-			setUndo({ ...removed, title });
+			setUndo({ sub, index, title });
 		},
-		[unsubscribe, feedById],
+		[subscriptions, feedById],
 	);
 
 	const undoUnfollow = useCallback(() => {
 		setUndo((u) => {
-			if (u) restore(u.sub, u.index);
+			if (u) {
+				setSubscriptions((prev) => {
+					if (prev.some((s) => s.id === u.sub.id)) return prev;
+					const next = [...prev];
+					next.splice(Math.min(u.index, next.length), 0, u.sub);
+					return next;
+				});
+				subscribeFeed({
+					data: { feedId: u.sub.id, flavor: u.sub.flavor },
+				}).catch(() => {});
+			}
 			return null;
 		});
-	}, [restore]);
+	}, []);
 
 	// One effect owns the auto-dismiss: a fresh unfollow swaps in a new `undo`
 	// object, which re-runs this and restarts the 6s timer; the cleanup also
@@ -106,13 +163,26 @@ function Settings() {
 	idsRef.current = ids;
 	const createFlavorsLink = useCallback(async (): Promise<string> => {
 		const { slug } = await createList({
-			data: { kind: "feeds", ids: idsRef.current, clientId: getClientId() },
+			data: { kind: "feeds", ids: idsRef.current },
 		});
 		return `${window.location.origin}/l/${slug}`;
 	}, []);
 
-	const reset = () => {
-		clear();
+	// Unfollow every flavor at once — the account-backed successor to the old
+	// "wipe local storage" button, now that subscriptions live server-side and
+	// there's nothing local left to wipe.
+	const unfollowAll = async () => {
+		setClearing(true);
+		const toRemove = subscriptions;
+		setSubscriptions([]);
+		const results = await Promise.allSettled(
+			toRemove.map((s) => unsubscribeFeed({ data: { feedId: s.id } })),
+		);
+		const failed = toRemove.filter((_, i) => results[i].status === "rejected");
+		if (failed.length) {
+			setSubscriptions((prev) => [...prev, ...failed]);
+		}
+		setClearing(false);
 		setCleared(true);
 	};
 
@@ -129,11 +199,11 @@ function Settings() {
 					<div className="flex items-center justify-between">
 						<h2 className="kicker">Your flavors</h2>
 						<span className="text-xs text-cocoa-soft">
-							{hydrated ? subscriptions.length : ""}
+							{subscriptions.length}
 						</span>
 					</div>
 
-					{hydrated && subscriptions.length === 0 ? (
+					{subscriptions.length === 0 ? (
 						<div className="whip-card mt-4 flex flex-col items-center gap-4 p-8 text-center">
 							<p className="max-w-[40ch] text-cocoa-soft">
 								No flavors yet. Browse the scoop shop to follow your first feed.
@@ -185,7 +255,7 @@ function Settings() {
 									<Plus className="size-4" aria-hidden />
 									Add a flavor
 								</Button>
-								{hydrated && subscriptions.length > 0 ? (
+								{subscriptions.length > 0 ? (
 									<Button
 										variant="ghost"
 										onClick={() => setShareOpen(true)}
@@ -218,35 +288,34 @@ function Settings() {
 					/>
 				</div>
 
-				{/* Wipe local storage — moved here from the About page. */}
+				{/* Unfollow everything — the account-backed successor to the old
+				    "wipe local storage" button. */}
 				<div className="whip-card mt-4 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
 					<div className="min-w-0">
 						<p className="font-semibold text-foreground text-sm">
-							Wipe your Flavors
+							Unfollow all your flavors
 						</p>
 						<p className="text-cocoa-soft text-sm">
-							{hydrated
-								? `Clears your ${subscriptions.length} subscription${
-										subscriptions.length === 1 ? "" : "s"
-									} from this browser.`
-								: "Clears your subscriptions from this browser."}
+							{`Unfollows all ${subscriptions.length} flavor${
+								subscriptions.length === 1 ? "" : "s"
+							} on your account.`}
 						</p>
 					</div>
 					<Button
 						variant="outline"
-						onClick={reset}
-						disabled={cleared || (hydrated && subscriptions.length === 0)}
+						onClick={unfollowAll}
+						disabled={clearing || cleared || subscriptions.length === 0}
 						className="shrink-0 rounded-full"
 					>
 						{cleared ? (
 							<>
 								<Check className="size-4" aria-hidden />
-								Cleared
+								Unfollowed
 							</>
 						) : (
 							<>
 								<Trash2 className="size-4" aria-hidden />
-								Reset Local Storage
+								{clearing ? "Unfollowing…" : "Unfollow all"}
 							</>
 						)}
 					</Button>

@@ -1,10 +1,12 @@
-import { Link } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
+import { LogOut, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { SprinkleShower } from "#/components/sprinkle-shower";
 import { ThemeToggle } from "#/components/theme-toggle";
 import { Button } from "#/components/ui/button";
+import { voodooLoginUrl } from "#/lib/auth";
+import { useSession } from "#/lib/use-session";
 
 const navLink =
 	"rounded-full px-3 py-1.5 text-cocoa-soft no-underline transition-colors hover:bg-secondary hover:text-foreground [&.active]:bg-secondary [&.active]:text-foreground";
@@ -15,6 +17,11 @@ export function SiteHeader() {
 	const clicks = useRef(0);
 	const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const [sprinkling, setSprinkling] = useState(false);
+
+	const session = useSession();
+	const currentHref = useRouterState({
+		select: (s) => s.location.href,
+	});
 
 	const onLogoClick = () => {
 		clicks.current += 1;
@@ -74,6 +81,38 @@ export function SiteHeader() {
 							<span className="hidden sm:inline">Ask Scoop</span>
 						</Link>
 					</Button>
+					{session ? (
+						<form
+							method="post"
+							action="/logout"
+							className="flex items-center gap-1.5"
+						>
+							<span className="hidden max-w-[10rem] truncate text-cocoa-soft text-sm sm:inline">
+								{session.email.split("@")[0]}
+							</span>
+							<Button
+								type="submit"
+								variant="outline"
+								size="sm"
+								className="rounded-full"
+								aria-label="Sign out"
+							>
+								<LogOut className="size-4" aria-hidden />
+								<span className="hidden sm:inline">Sign out</span>
+							</Button>
+						</form>
+					) : (
+						<Button
+							asChild
+							size="sm"
+							variant="outline"
+							className="rounded-full"
+						>
+							<a href={voodooLoginUrl(currentHref)} className="no-underline">
+								Sign in
+							</a>
+						</Button>
+					)}
 				</div>
 			</div>
 

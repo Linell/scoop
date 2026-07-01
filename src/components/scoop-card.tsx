@@ -15,9 +15,9 @@ import { recordStoryOpen } from "#/server/feeds";
 
 /**
  * Presentational story card. The bookmark's saved state and toggle handler are
- * owned by the parent grid (which calls useSaved once for the whole page) — so a
- * card never subscribes to the saved store itself, and saving one story doesn't
- * re-render every other card. The parent fires the durable save signal.
+ * owned by the parent grid (which holds the saved-id set once for the whole
+ * page) — so a card never tracks saved state itself, and saving one story
+ * doesn't re-render every other card. The parent fires the durable save signal.
  */
 export function ScoopCard({
 	story,

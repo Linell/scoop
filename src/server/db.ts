@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { type Session, VOODOO_COOKIE_NAME, VOODOO_URL } from "#/lib/auth";
 import {
 	fetchAndParseFeed,
 	hashId,
@@ -9,12 +10,136 @@ import type { CatalogFeed, Feed, Story } from "#/lib/types";
 import { faviconUrl } from "#/lib/url";
 
 /**
- * D1 data access for the shared catalog. Everything keys off a URL hash so the
- * same feed/story is stored once and shared across all visitors (and, later,
- * shares one set of summaries + scores). No per-user rows live here.
+ * D1 data access for the shared catalog (feeds/stories key off a URL hash so
+ * the same feed/story is stored once and shared across all visitors) plus the
+ * per-user account tables (subscriptions, saved stories) added alongside
+ * voodoo-backed auth. Session resolution (below) lives here too, not in
+ * server/auth.ts: it's the only file every `cloudflare:workers`-touching
+ * export reaches through a stripped createServerFn/createMiddleware
+ * `.handler()`/`.server()` body, never through a plain re-export — see the
+ * comment on authMiddleware in server/auth.ts for why that boundary matters.
  */
 
 const db = () => env.DB;
+
+// --- Session resolution ------------------------------------------------------
+// There is no local login/signup: a reader is "signed in" purely because their
+// browser is holding a `voodoo_session` cookie that `.thelinell.com` scoped,
+// which voodoo will vouch for via `/me`.
+
+function readSessionCookie(request: Request): string | null {
+	const header = request.headers.get("cookie");
+	if (!header) return null;
+	for (const part of header.split(";")) {
+		const eq = part.indexOf("=");
+		if (eq === -1) continue;
+		if (part.slice(0, eq).trim() === VOODOO_COOKIE_NAME) {
+			return part.slice(eq + 1).trim();
+		}
+	}
+	return null;
+}
+
+// The cookie is a bearer credential; hash it before using it as a KV key so a
+// leaked cache key (logs, KV dashboard) can't be replayed as a session.
+async function hashCookie(value: string): Promise<string> {
+	const bytes = new TextEncoder().encode(value);
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	return [...new Uint8Array(digest)]
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+}
+
+type CachedSession = Session | { authenticated: false };
+
+// Negative results are cached too (not just positive ones) so a signed-out
+// visitor doesn't cost a voodoo round-trip on every server fn call.
+const NEGATIVE: CachedSession = { authenticated: false };
+const CACHE_TTL_SECONDS = 60;
+
+function isValidCachedSession(cached: CachedSession): boolean {
+	if ("authenticated" in cached) return true;
+	return typeof cached.id === "string" && typeof cached.email === "string";
+}
+
+type VoodooMe = {
+	id: string;
+	email: string;
+	is_admin: boolean;
+	timezone: string;
+};
+
+async function upsertUser(me: VoodooMe): Promise<void> {
+	const now = Date.now();
+	await db()
+		.prepare(
+			`INSERT INTO users (id, email, is_admin, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET
+			   email = excluded.email,
+			   is_admin = excluded.is_admin,
+			   updated_at = excluded.updated_at`,
+		)
+		.bind(me.id, me.email, me.is_admin ? 1 : 0, now, now)
+		.run();
+}
+
+/**
+ * Resolve the caller's session, if any. No cookie means no network call. A
+ * cookie is looked up by its hash in SESSION_CACHE first; on a miss we ask
+ * voodoo, upsert the local `users` row, and cache the (positive or negative)
+ * result for 60s so a chatty page doesn't hammer voodoo per server fn.
+ */
+export async function getSession(request: Request): Promise<Session | null> {
+	const cookie = readSessionCookie(request);
+	if (!cookie) return null;
+
+	const key = `session:${await hashCookie(cookie)}`;
+	const cached = await env.SESSION_CACHE.get<CachedSession>(key, "json");
+	if (cached && isValidCachedSession(cached)) {
+		return "authenticated" in cached ? null : cached;
+	}
+
+	let session: Session | null = null;
+	let reachedVoodoo = true;
+	try {
+		const res = await fetch(`${VOODOO_URL}/me`, {
+			headers: { cookie: `${VOODOO_COOKIE_NAME}=${cookie}` },
+			signal: AbortSignal.timeout(5000),
+		});
+		if (res.ok) {
+			const me = (await res.json()) as VoodooMe;
+			session = {
+				id: me.id,
+				email: me.email,
+				isAdmin: me.is_admin,
+				timezone: me.timezone,
+			};
+			await upsertUser(me);
+		}
+	} catch {
+		// Voodoo was unreachable, not just unauthenticated — fail closed for this
+		// request, but don't cache the outage as a real logout: caching it would
+		// keep a legitimately signed-in reader logged out for the full TTL even
+		// after voodoo recovers.
+		session = null;
+		reachedVoodoo = false;
+	}
+
+	if (reachedVoodoo) {
+		await env.SESSION_CACHE.put(key, JSON.stringify(session ?? NEGATIVE), {
+			expirationTtl: CACHE_TTL_SECONDS,
+		});
+	}
+	return session;
+}
+
+/** Drop a session's cached lookup, e.g. on logout, so the next request re-checks voodoo. */
+export async function clearSessionCache(request: Request): Promise<void> {
+	const cookie = readSessionCookie(request);
+	if (!cookie) return;
+	await env.SESSION_CACHE.delete(`session:${await hashCookie(cookie)}`);
+}
 
 // Newest N stories we keep visible per feed. Plenty for a demo; keeps cards fresh.
 const STORIES_PER_FEED = 40;
@@ -337,6 +462,31 @@ export async function getStoriesByIds(ids: string[]): Promise<Story[]> {
 	return ids.map((id) => byId.get(id)).filter((s): s is Story => s != null);
 }
 
+const DEFAULT_POPULAR_LIMIT = 30;
+
+/**
+ * The catalog's most-engaged stories, for readers with no subscriptions yet
+ * (the anonymous chat fallback and, later, a "popular" browse view). Ranks by
+ * a simple weighted engagement score — a save or clickthrough says more than
+ * an open — treating NULL counters as 0. Ranks ids first, then reuses
+ * getStoriesByIds' card-shaping so this doesn't duplicate the row mapping.
+ */
+export async function getPopularStories(
+	limit = DEFAULT_POPULAR_LIMIT,
+): Promise<Story[]> {
+	const { results } = await db()
+		.prepare(
+			`SELECT id,
+			        (COALESCE(open_count, 0) + COALESCE(clickthrough_count, 0) * 2 + COALESCE(save_count, 0) * 3) AS score
+			 FROM stories
+			 ORDER BY score DESC, published_at DESC
+			 LIMIT ?`,
+		)
+		.bind(limit)
+		.all<{ id: string; score: number }>();
+	return getStoriesByIds(results.map((r) => r.id));
+}
+
 /** A single story by id (used by the summarize job). */
 export async function getStoryById(id: string): Promise<Story | null> {
 	const row = await db()
@@ -473,9 +623,9 @@ export async function getCatalog(): Promise<CatalogFeed[]> {
 	const { results } = await db()
 		.prepare(
 			`SELECT f.feed_url, f.title, f.site_url, f.description, f.category, f.icon_url,
-			        COUNT(s.client_id) AS subscriber_count
+			        COUNT(s.user_id) AS subscriber_count
 			 FROM feeds f
-			 LEFT JOIN feed_subscriptions s ON s.feed_id = f.id
+			 LEFT JOIN user_subscriptions s ON s.feed_id = f.id
 			 GROUP BY f.id
 			 ORDER BY subscriber_count DESC, f.title COLLATE NOCASE
 			 LIMIT 2000`,
@@ -493,13 +643,14 @@ export async function getCatalog(): Promise<CatalogFeed[]> {
 }
 
 /**
- * Record a visitor's subscription to a feed and promote it into the refresh
- * rotation. Returns the feed's url plus whether it still needs an initial ingest
- * (no stories yet), or null when the feed id is unknown.
+ * Record a signed-in user's subscription to a feed and promote it into the
+ * refresh rotation. Returns the feed's url plus whether it still needs an
+ * initial ingest (no stories yet), or null when the feed id is unknown.
  */
 export async function subscribeFeed(
-	clientId: string,
+	userId: string,
 	feedId: string,
+	flavor: string,
 ): Promise<{ feedUrl: string; needsIngest: boolean } | null> {
 	// Look up the feed FIRST — one round-trip that also reports whether it
 	// already has stories. An unknown id must never leave behind an orphan
@@ -520,10 +671,10 @@ export async function subscribeFeed(
 	await db().batch([
 		db()
 			.prepare(
-				`INSERT OR IGNORE INTO feed_subscriptions (client_id, feed_id, created_at)
-				 VALUES (?, ?, ?)`,
+				`INSERT OR IGNORE INTO user_subscriptions (user_id, feed_id, flavor, created_at)
+				 VALUES (?, ?, ?, ?)`,
 			)
-			.bind(clientId, feedId, Date.now()),
+			.bind(userId, feedId, flavor, Date.now()),
 		db()
 			.prepare(
 				`UPDATE feeds SET status = 'active' WHERE id = ? AND status != 'active'`,
@@ -535,12 +686,12 @@ export async function subscribeFeed(
 }
 
 /**
- * Drop a visitor's subscription and demote the feed to 'dormant' if that was its
+ * Drop a user's subscription and demote the feed to 'dormant' if that was its
  * last subscriber. Both the delete and the demote are guarded so a feed only
  * leaves the rotation when no one follows it.
  */
 export async function unsubscribeFeed(
-	clientId: string,
+	userId: string,
 	feedId: string,
 ): Promise<void> {
 	// One batched (transactional, ordered) round-trip: the demote's NOT EXISTS
@@ -548,17 +699,229 @@ export async function unsubscribeFeed(
 	await db().batch([
 		db()
 			.prepare(
-				`DELETE FROM feed_subscriptions WHERE client_id = ? AND feed_id = ?`,
+				`DELETE FROM user_subscriptions WHERE user_id = ? AND feed_id = ?`,
 			)
-			.bind(clientId, feedId),
+			.bind(userId, feedId),
 		db()
 			.prepare(
 				`UPDATE feeds SET status = 'dormant'
 				 WHERE id = ? AND status = 'active'
-				   AND NOT EXISTS (SELECT 1 FROM feed_subscriptions WHERE feed_id = ?)`,
+				   AND NOT EXISTS (SELECT 1 FROM user_subscriptions WHERE feed_id = ?)`,
 			)
 			.bind(feedId, feedId),
 	]);
+}
+
+/** A signed-in user's subscriptions (feed id + flavor), for hydrating their feed list. */
+export async function getUserSubscriptions(
+	userId: string,
+): Promise<{ feedId: string; flavor: string }[]> {
+	const { results } = await db()
+		.prepare(`SELECT feed_id, flavor FROM user_subscriptions WHERE user_id = ?`)
+		.bind(userId)
+		.all<{ feed_id: string; flavor: string }>();
+	return results.map((r) => ({ feedId: r.feed_id, flavor: r.flavor }));
+}
+
+/** Add one subscription row directly (used by settings/flavor changes, not the
+ *  ingest-triggering subscribe flow above). INSERT OR IGNORE keeps it idempotent. */
+export async function addUserSubscription(
+	userId: string,
+	feedId: string,
+	flavor: string,
+): Promise<void> {
+	await db()
+		.prepare(
+			`INSERT OR IGNORE INTO user_subscriptions (user_id, feed_id, flavor, created_at)
+			 VALUES (?, ?, ?, ?)`,
+		)
+		.bind(userId, feedId, flavor, Date.now())
+		.run();
+}
+
+/** Remove one subscription row directly, without touching the feed's rotation status. */
+export async function removeUserSubscription(
+	userId: string,
+	feedId: string,
+): Promise<void> {
+	await db()
+		.prepare(`DELETE FROM user_subscriptions WHERE user_id = ? AND feed_id = ?`)
+		.bind(userId, feedId)
+		.run();
+}
+
+// --- Saved stories -----------------------------------------------------------
+
+type SavedStoryRow = {
+	story_id: string;
+	saved_at: number;
+	collections: string;
+};
+
+/** A user's saved-story rows (id, when, and which collections it's filed under),
+ *  newest save first. Callers needing the hydrated Story cards should pass the
+ *  ids through getStoriesByIds. */
+export async function getUserSavedStories(
+	userId: string,
+): Promise<{ storyId: string; savedAt: number; collections: string[] }[]> {
+	const { results } = await db()
+		.prepare(
+			`SELECT story_id, saved_at, collections FROM user_saved_stories
+			 WHERE user_id = ? ORDER BY saved_at DESC`,
+		)
+		.bind(userId)
+		.all<SavedStoryRow>();
+	return results.map((r) => ({
+		storyId: r.story_id,
+		savedAt: r.saved_at,
+		collections: JSON.parse(r.collections) as string[],
+	}));
+}
+
+/** Save (or re-file) a story to a user's reading list under the given collections. */
+export async function saveUserStory(
+	userId: string,
+	storyId: string,
+	collections: string[],
+): Promise<void> {
+	await db()
+		.prepare(
+			`INSERT INTO user_saved_stories (user_id, story_id, saved_at, collections)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(user_id, story_id) DO UPDATE SET
+			   saved_at = excluded.saved_at`,
+		)
+		.bind(userId, storyId, Date.now(), JSON.stringify(collections))
+		.run();
+}
+
+/** Overwrite a saved story's collection membership. The row must already exist. */
+export async function setUserStoryCollections(
+	userId: string,
+	storyId: string,
+	collections: string[],
+): Promise<void> {
+	await db()
+		.prepare(
+			`UPDATE user_saved_stories SET collections = ? WHERE user_id = ? AND story_id = ?`,
+		)
+		.bind(JSON.stringify(collections), userId, storyId)
+		.run();
+}
+
+/** Remove a story from a user's reading list. */
+export async function unsaveUserStory(
+	userId: string,
+	storyId: string,
+): Promise<void> {
+	await db()
+		.prepare(
+			`DELETE FROM user_saved_stories WHERE user_id = ? AND story_id = ?`,
+		)
+		.bind(userId, storyId)
+		.run();
+}
+
+/** Whether a user has this one story saved — the story page's save button
+ *  needs this single check, not the full reading list. */
+export async function isStorySaved(
+	userId: string,
+	storyId: string,
+): Promise<boolean> {
+	const row = await db()
+		.prepare(
+			`SELECT 1 FROM user_saved_stories WHERE user_id = ? AND story_id = ?`,
+		)
+		.bind(userId, storyId)
+		.first();
+	return row !== null;
+}
+
+// --- Local-state import -------------------------------------------------------
+// One-time merge of a browser's pre-login localStorage state (subscriptions +
+// saved stories) into a freshly-signed-in user's server-side rows, run once
+// from the client right after voodoo hands back a session.
+
+export type ImportSubscription = { id: string; flavor: string };
+export type ImportSavedStory = {
+	storyId: string;
+	savedAt: number;
+	collections: string[];
+};
+
+/**
+ * Idempotent merge of a browser's local subscriptions + saved stories into a
+ * user's server-side rows. Subscriptions are a plain INSERT OR IGNORE (first
+ * writer wins on flavor — a cosmetic detail, not worth reconciling). Saved
+ * stories need a real union merge because `collections` can differ between
+ * the two copies of a save; SQLite has no clean inline JSON-array-union
+ * expression, so each row is merged in JS (read existing → union → upsert)
+ * rather than attempted in one fragile SQL statement.
+ */
+export async function importLocalState(
+	userId: string,
+	subscriptions: ImportSubscription[],
+	saved: ImportSavedStory[],
+): Promise<void> {
+	const statements = subscriptions.map(({ id, flavor }) =>
+		db()
+			.prepare(
+				`INSERT OR IGNORE INTO user_subscriptions (user_id, feed_id, flavor, created_at)
+				 VALUES (?, ?, ?, ?)`,
+			)
+			.bind(userId, id, flavor, Date.now()),
+	);
+	if (statements.length > 0) await db().batch(statements);
+
+	if (saved.length === 0) return;
+
+	const existingRows = await queryByIdChunks<
+		SavedStoryRow & { story_id: string }
+	>(
+		saved.map((s) => s.storyId),
+		async (slice) => {
+			const placeholders = slice.map(() => "?").join(", ");
+			const { results } = await db()
+				.prepare(
+					`SELECT story_id, saved_at, collections FROM user_saved_stories
+					 WHERE user_id = ? AND story_id IN (${placeholders})`,
+				)
+				.bind(userId, ...slice)
+				.all<SavedStoryRow>();
+			return results;
+		},
+	);
+	const existingById = new Map(existingRows.map((r) => [r.story_id, r]));
+
+	const upserts = saved.map((incoming) => {
+		const existing = existingById.get(incoming.storyId);
+		const savedAt = existing
+			? Math.min(existing.saved_at, incoming.savedAt)
+			: incoming.savedAt;
+		const mergedCollections = existing
+			? [
+					...new Set([
+						...(JSON.parse(existing.collections) as string[]),
+						...incoming.collections,
+					]),
+				]
+			: incoming.collections;
+		return db()
+			.prepare(
+				`INSERT INTO user_saved_stories (user_id, story_id, saved_at, collections)
+				 VALUES (?, ?, ?, ?)
+				 ON CONFLICT(user_id, story_id) DO UPDATE SET
+				   saved_at = excluded.saved_at,
+				   collections = excluded.collections`,
+			)
+			.bind(
+				userId,
+				incoming.storyId,
+				savedAt,
+				JSON.stringify(mergedCollections),
+			);
+	});
+	await db().batch(upserts);
 }
 
 /** A single feed by id (used by submit for dedup). Null if unknown. */

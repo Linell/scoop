@@ -5,12 +5,13 @@ import { Markdown } from "#/components/markdown";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
 import { type ChatCitation, storyToCitation } from "#/lib/citation";
+import { FLAVORS, type Subscription } from "#/lib/flavor";
 import { getBrowseSession } from "#/lib/session";
-import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import type { Feed, Story } from "#/lib/types";
 import { storyClickHref } from "#/lib/url";
+import { useSession } from "#/lib/use-session";
 import { askScoop, type ChatReply } from "#/server/chat";
-import { getFeeds, getStories } from "#/server/feeds";
+import { getFeeds, getMySubscriptions, getStories } from "#/server/feeds";
 
 export const Route = createFileRoute("/chat")({ component: Chat });
 
@@ -85,7 +86,13 @@ function followupPrompts(message: Message): Prompt[] {
 }
 
 function Chat() {
-	const { subscriptions, hydrated } = useSubscriptions();
+	const session = useSession();
+	const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+	// Signed-out visitors have no subscriptions to speak of — they get the
+	// generic starters + popular-story fallback (askScoop's empty-feedIds path)
+	// same as the signed-out home. No `hydrated` gate needed since there's no
+	// localStorage read here anymore, just a session-gated fetch below.
+	const [subsLoaded, setSubsLoaded] = useState(false);
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [draft, setDraft] = useState("");
 	const [pending, setPending] = useState(false);
@@ -112,10 +119,35 @@ function Chat() {
 		return (id: string) => byId.get(id) ?? "a feed";
 	}, [feeds]);
 
-	// Load the visitor's feeds + stories once hydrated, so the page can speak in
-	// real headlines and source names rather than generic prompts.
+	// Pull the signed-in reader's subscriptions once; a signed-out visitor has
+	// none, so this just marks `subsLoaded` and leaves feedIds empty.
 	useEffect(() => {
-		if (!hydrated) return;
+		if (!session) {
+			setSubsLoaded(true);
+			return;
+		}
+		let cancelled = false;
+		getMySubscriptions()
+			.then((subs) => {
+				if (cancelled) return;
+				setSubscriptions(subs.map((s) => ({ id: s.feedId, flavor: s.flavor })));
+				setSubsLoaded(true);
+			})
+			.catch(() => {
+				// Treat a failed lookup like "no subscriptions known" so the UI unblocks.
+				if (cancelled) return;
+				setSubsLoaded(true);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [session]);
+
+	// Load the visitor's feeds + stories once their subscriptions are known, so
+	// the page can speak in real headlines and source names rather than generic
+	// prompts.
+	useEffect(() => {
+		if (!subsLoaded) return;
 		if (feedIds.length === 0) {
 			setFeeds([]);
 			setStories([]);
@@ -136,7 +168,7 @@ function Chat() {
 		return () => {
 			cancelled = true;
 		};
-	}, [feedIds, hydrated]);
+	}, [feedIds, subsLoaded]);
 
 	const starters = useMemo(
 		() => starterPrompts(stories, titleOf),
@@ -293,7 +325,7 @@ function Chat() {
 								send(draft);
 							}
 						}}
-						disabled={!hydrated}
+						disabled={!subsLoaded}
 						aria-label="Ask Scoop anything"
 						placeholder="Ask Scoop anything…"
 						className="max-h-40 flex-1 resize-none bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-cocoa-soft"

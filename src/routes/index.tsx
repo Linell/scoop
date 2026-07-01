@@ -1,25 +1,53 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Loader2, Plus, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowseFlavorsDialog } from "#/components/browse-flavors-dialog";
 import { FlavorFilterMenu } from "#/components/flavor-filter-menu";
 import { ScoopCard } from "#/components/scoop-card";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
 import { Skeleton } from "#/components/ui/skeleton";
-import { getClientId } from "#/lib/client-id";
+import { voodooLoginUrl } from "#/lib/auth";
 import { useFeedFilter } from "#/lib/feed-filter";
 import { useFeedView } from "#/lib/feed-view";
-import { useSaved } from "#/lib/saved";
+import { FLAVORS, type Subscription } from "#/lib/flavor";
 import { getBrowseSession } from "#/lib/session";
-import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import type { Feed, Story } from "#/lib/types";
 import { feedIdForUrl } from "#/lib/url";
 import { useAddFeed } from "#/lib/use-add-feed";
-import { getFeeds, getStories, recordStorySave } from "#/server/feeds";
+import {
+	getFeeds,
+	getMySubscriptions,
+	getPopularStories,
+	getStories,
+	recordStorySave,
+	removeStorySave,
+	subscribeFeed,
+} from "#/server/feeds";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+	// Signed-out: the popular-stories grid. Signed-in: hydrate their own
+	// subscriptions + feed, sourced server-side instead of localStorage.
+	loader: async ({ context }) => {
+		if (!context.user) {
+			return { signedIn: false as const, popular: await getPopularStories() };
+		}
+		const subs = await getMySubscriptions();
+		const ids = subs.map((s) => s.feedId);
+		const [feeds, stories] = await Promise.all([
+			ids.length ? getFeeds({ data: ids }) : Promise.resolve([]),
+			ids.length ? getStories({ data: ids }) : Promise.resolve([]),
+		]);
+		return {
+			signedIn: true as const,
+			subscriptions: subs.map((s) => ({ id: s.feedId, flavor: s.flavor })),
+			feeds,
+			stories,
+		};
+	},
+	component: Home,
+});
 
 const SUGGESTED: { title: string; url: string }[] = [
 	{ title: "Hacker News", url: "https://hnrss.org/frontpage" },
@@ -27,20 +55,120 @@ const SUGGESTED: { title: string; url: string }[] = [
 ];
 
 function Home() {
-	const { subscriptions, hydrated, subscribe, isSubscribed } =
-		useSubscriptions();
+	const data = Route.useLoaderData();
+	return data.signedIn ? (
+		<SignedInHome
+			initialSubscriptions={data.subscriptions}
+			initialFeeds={data.feeds}
+			initialStories={data.stories}
+		/>
+	) : (
+		<SignedOutHome popular={data.popular} />
+	);
+}
+
+/** The today's-date header, shared by both the signed-in and signed-out home. */
+function todayHeading(): string {
+	return new Date().toLocaleDateString("en-US", {
+		weekday: "long",
+		year: "numeric",
+		month: "long",
+		day: "numeric",
+	});
+}
+
+/**
+ * Signed-out landing: no subscriptions to speak of, so the feed is the
+ * catalog's most-engaged stories plus a banner nudging toward an account. The
+ * save toggle and "browse" flow both prompt sign-in rather than silently
+ * failing against server fns that now require a session.
+ */
+function SignedOutHome({ popular }: { popular: Story[] }) {
+	const { view } = useFeedView();
+
+	// The save toggle still renders for a signed-out visitor (so the affordance
+	// is visible, not silently missing) — tapping it is a deliberate prompt to
+	// sign in rather than a no-op against a server fn that now requires a session.
+	const promptSignIn = useCallback(() => {
+		window.location.href = voodooLoginUrl("/");
+	}, []);
+
+	return (
+		<main id="main-content" className="mx-auto w-full max-w-6xl px-4 pb-24">
+			<section className="melt-in py-10 sm:py-14">
+				<p className="kicker">The scoop for</p>
+				<h1 className="scoop-title mt-3 text-[2rem] text-foreground sm:text-6xl">
+					{todayHeading()}
+				</h1>
+
+				<div className="whip-card mt-7 flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+					<div className="min-w-0">
+						<p className="font-semibold text-foreground text-sm">
+							Sign in to build your own flavors
+						</p>
+						<p className="text-cocoa-soft text-sm">
+							Follow feeds, save scoops for later, and carry them to any device
+							— it's your scoop shop, wherever you read.
+						</p>
+					</div>
+					<Button asChild className="shrink-0 rounded-full">
+						<a href={voodooLoginUrl("/")} className="no-underline">
+							Sign in
+						</a>
+					</Button>
+				</div>
+			</section>
+
+			<section className="min-w-0">
+				<div className="mb-4 flex items-center justify-between gap-3">
+					<h2 className="kicker">Popular scoops</h2>
+				</div>
+
+				{popular.length === 0 ? (
+					<EmptyScoops>
+						Nothing churning yet — check back once the kitchen's warmed up.
+					</EmptyScoops>
+				) : (
+					<div className="grid gap-5 sm:grid-cols-2">
+						{popular.map((story, i) => (
+							<ScoopCard
+								key={story.id}
+								story={story}
+								feed={undefined}
+								flavor={FLAVORS[i % FLAVORS.length]}
+								index={i}
+								view={view}
+								saved={false}
+								onToggleSave={promptSignIn}
+							/>
+						))}
+					</div>
+				)}
+			</section>
+		</main>
+	);
+}
+
+function SignedInHome({
+	initialSubscriptions,
+	initialFeeds,
+	initialStories,
+}: {
+	initialSubscriptions: Subscription[];
+	initialFeeds: Feed[];
+	initialStories: Story[];
+}) {
+	const [subscriptions, setSubscriptions] = useState(initialSubscriptions);
+	const [feeds, setFeeds] = useState<Feed[]>(initialFeeds);
+	const [stories, setStories] = useState<Story[]>(initialStories);
+	const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set());
+	const savedIdsRef = useRef(savedIds);
+	savedIdsRef.current = savedIds;
+	const [loading, setLoading] = useState(false);
+	const [dialogOpen, setDialogOpen] = useState(false);
 	// How cards render — text-only (default) or with lead images. Set on the
 	// Settings page and remembered; the feed itself stays free of chrome.
 	const { view } = useFeedView();
-	// One saved-store subscription for the whole grid — the cards are
-	// presentational and just take a `saved` flag plus a toggle handler, so
-	// saving one story no longer re-renders every card.
-	const { isSaved, toggle } = useSaved();
-
-	const [feeds, setFeeds] = useState<Feed[]>([]);
-	const [stories, setStories] = useState<Story[]>([]);
-	const [loading, setLoading] = useState(false);
-	const [dialogOpen, setDialogOpen] = useState(false);
 	// Which flavors the feed is focused on (multi-select). An empty set means
 	// "show every flavor". Persisted to localStorage so focus survives reloads.
 	const {
@@ -64,9 +192,29 @@ function Home() {
 		[feeds],
 	);
 
+	const isSubscribed = useCallback(
+		(id: string) => subscriptions.some((s) => s.id === id),
+		[subscriptions],
+	);
+
+	// Follow a feed server-side and reflect it locally — the account-backed
+	// successor to useSubscriptions' localStorage writer.
+	const subscribe = useCallback(
+		(id: string) => {
+			if (isSubscribed(id)) return;
+			const flavor = FLAVORS[subscriptions.length % FLAVORS.length];
+			setSubscriptions((prev) =>
+				prev.some((s) => s.id === id) ? prev : [...prev, { id, flavor }],
+			);
+			subscribeFeed({ data: { feedId: id, flavor } }).catch(() => {
+				setSubscriptions((prev) => prev.filter((s) => s.id !== id));
+			});
+		},
+		[isSubscribed, subscriptions.length],
+	);
+
 	// Refetch feed records + stories whenever the subscription set changes.
 	useEffect(() => {
-		if (!hydrated) return;
 		if (ids.length === 0) {
 			setFeeds([]);
 			setStories([]);
@@ -86,14 +234,14 @@ function Home() {
 		return () => {
 			cancelled = true;
 		};
-	}, [ids, hydrated]);
+	}, [ids]);
 
 	// Drop any focused flavors the visitor has since unsubscribed, so a stale
-	// filter can't leave the feed empty. Wait until both sides have hydrated so
-	// we don't prune against an empty subscription list on first paint.
+	// filter can't leave the feed empty. Wait until the filter has hydrated so we
+	// don't prune against an empty selection on first paint.
 	useEffect(() => {
-		if (hydrated && filterHydrated) retainFilter(ids);
-	}, [hydrated, filterHydrated, ids, retainFilter]);
+		if (filterHydrated) retainFilter(ids);
+	}, [filterHydrated, ids, retainFilter]);
 
 	// Filtering is purely client-side: narrow the already-loaded stories to the
 	// focused flavors before rendering the grid. Empty selection = show all.
@@ -116,33 +264,34 @@ function Home() {
 	// onDialogAdd (the browse dialog's combined catalog-pick / paste-URL handler).
 	const { addByUrl, onDialogAdd } = useAddFeed(subscribe);
 
-	// Save handler shared by every card in the grid. On a transition INTO saved,
-	// fire the durable save signal best-effort; unsaving is purely local.
-	const onToggleSave = useCallback(
-		(storyId: string) => {
-			const wasSaved = isSaved(storyId);
-			toggle(storyId);
-			if (!wasSaved) {
-				recordStorySave({
-					data: {
-						storyId,
-						browseSession: getBrowseSession(),
-						clientId: getClientId(),
-					},
-				}).catch(() => {});
-			}
-		},
-		[isSaved, toggle],
-	);
+	// Save handler shared by every card in the grid. Signed-in only (this
+	// component never renders signed-out), so no login-guard needed here — that
+	// lives in SignedOutHome's promptSignIn instead.
+	const onToggleSave = useCallback((storyId: string) => {
+		const wasSaved = savedIdsRef.current.has(storyId);
+		setSavedIds((prev) => {
+			const next = new Set(prev);
+			if (wasSaved) next.delete(storyId);
+			else next.add(storyId);
+			return next;
+		});
+		const revert = () =>
+			setSavedIds((prev) => {
+				const next = new Set(prev);
+				if (wasSaved) next.add(storyId);
+				else next.delete(storyId);
+				return next;
+			});
+		if (wasSaved) {
+			removeStorySave({ data: storyId }).catch(revert);
+		} else {
+			recordStorySave({
+				data: { storyId, browseSession: getBrowseSession() },
+			}).catch(revert);
+		}
+	}, []);
 
-	const showSkeletons = !hydrated || (loading && stories.length === 0);
-
-	const today = new Date().toLocaleDateString("en-US", {
-		weekday: "long",
-		year: "numeric",
-		month: "long",
-		day: "numeric",
-	});
+	const showSkeletons = loading && stories.length === 0;
 
 	return (
 		<main id="main-content" className="mx-auto w-full max-w-6xl px-4 pb-24">
@@ -150,7 +299,7 @@ function Home() {
 			<section className="melt-in py-10 sm:py-14">
 				<p className="kicker">The scoop for</p>
 				<h1 className="scoop-title mt-3 text-[2rem] text-foreground sm:text-6xl">
-					{today}
+					{todayHeading()}
 				</h1>
 
 				<Link
@@ -175,7 +324,7 @@ function Home() {
 				<div className="mb-4 flex items-center justify-between gap-3">
 					<div className="flex min-w-0 items-center gap-3">
 						<h2 className="kicker">Fresh scoops</h2>
-						{hydrated && subscriptions.length > 0 ? (
+						{subscriptions.length > 0 ? (
 							<FlavorFilterMenu
 								subscriptions={subscriptions}
 								feedById={feedById}
@@ -237,7 +386,7 @@ function Home() {
 									flavor={flavorById.get(story.feedId) ?? "var(--strawberry)"}
 									index={i}
 									view={view}
-									saved={isSaved(story.id)}
+									saved={savedIds.has(story.id)}
 									onToggleSave={() => onToggleSave(story.id)}
 								/>
 							))}

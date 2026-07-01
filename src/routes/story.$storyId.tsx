@@ -12,18 +12,18 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { LeadImage } from "#/components/lead-image";
 import { Button } from "#/components/ui/button";
-import { useIsAdmin } from "#/lib/admin";
-import { getClientId } from "#/lib/client-id";
-import { useSaved } from "#/lib/saved";
+import { voodooLoginUrl } from "#/lib/auth";
+import { FLAVORS } from "#/lib/flavor";
 import { getBrowseSession } from "#/lib/session";
-import { FLAVORS } from "#/lib/subscriptions";
 import { relativeTime } from "#/lib/time";
 import { hashId, storyClickHref } from "#/lib/url";
+import { useSession } from "#/lib/use-session";
 import type { StoryDetail } from "#/server/feeds";
 import {
 	getStory,
 	rateSummary,
 	recordStorySave,
+	removeStorySave,
 	resummarizeStory,
 } from "#/server/feeds";
 
@@ -178,25 +178,34 @@ function CopyLinkButton() {
 }
 
 /**
- * Bookmark this story to the local reading list. On a transition into saved it
- * fires the durable save signal best-effort (saving is a strong positive
- * engagement signal); unsaving is purely local. No anchor here, so it's a plain
- * button — none of the nesting concerns the feed card has.
+ * Bookmark this story to the reader's account-backed reading list. Saving and
+ * unsaving are both durable server writes now. Signed-out visitors still see
+ * the control (never a silent no-op) — tapping it sends them to sign in
+ * instead of attempting a write that would fail server-side anyway. No anchor
+ * here, so it's a plain button — none of the nesting concerns the feed card has.
  */
-function SaveButton({ storyId }: { storyId: string }) {
-	const { isSaved, toggle } = useSaved();
-	const saved = isSaved(storyId);
+function SaveButton({
+	storyId,
+	initiallySaved,
+}: {
+	storyId: string;
+	initiallySaved: boolean;
+}) {
+	const session = useSession();
+	const [saved, setSaved] = useState(initiallySaved);
 
 	const onToggle = () => {
+		if (!session) {
+			window.location.href = voodooLoginUrl(window.location.pathname);
+			return;
+		}
 		const wasSaved = saved;
-		toggle(storyId);
-		if (!wasSaved) {
+		setSaved(!wasSaved);
+		if (wasSaved) {
+			removeStorySave({ data: storyId }).catch(() => {});
+		} else {
 			recordStorySave({
-				data: {
-					storyId,
-					browseSession: getBrowseSession(),
-					clientId: getClientId(),
-				},
+				data: { storyId, browseSession: getBrowseSession() },
 			}).catch(() => {});
 		}
 	};
@@ -225,8 +234,8 @@ function SaveButton({ storyId }: { storyId: string }) {
 }
 
 function StoryView({ detail }: { detail: StoryDetail }) {
-	const { story, feed } = detail;
-	const isAdmin = useIsAdmin();
+	const { story, feed, isSaved } = detail;
+	const isAdmin = useSession()?.isAdmin ?? false;
 	const flavor = flavorForFeed(story.feedId);
 
 	const [summary, setSummary] = useState<string | null>(story.summary);
@@ -359,7 +368,7 @@ function StoryView({ detail }: { detail: StoryDetail }) {
 							</a>
 						) : null}
 
-						<SaveButton storyId={story.id} />
+						<SaveButton storyId={story.id} initiallySaved={isSaved} />
 
 						<CopyLinkButton />
 

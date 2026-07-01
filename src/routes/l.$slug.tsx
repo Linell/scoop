@@ -1,20 +1,27 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Check, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ScoopLogo } from "#/components/scoop-logo";
 import { Button } from "#/components/ui/button";
+import { voodooLoginUrl } from "#/lib/auth";
 import { useCollections } from "#/lib/collections";
-import { flavorForFeed } from "#/lib/flavor";
-import { useSaved } from "#/lib/saved";
+import { FLAVORS, flavorForFeed } from "#/lib/flavor";
 import {
 	mergeSharedCollection,
 	parseShareStructure,
 	type ShareStructure,
 } from "#/lib/share-merge";
-import { FLAVORS, useSubscriptions } from "#/lib/subscriptions";
 import type { Story } from "#/lib/types";
+import { useSession } from "#/lib/use-session";
 import type { ListResult } from "#/server/feeds";
-import { getList } from "#/server/feeds";
+import {
+	getList,
+	getMySavedEntries,
+	getMySubscriptions,
+	recordStorySave,
+	subscribeFeed,
+	updateSavedCollections,
+} from "#/server/feeds";
 
 export const Route = createFileRoute("/l/$slug")({
 	// Fetch on the server so the preview is there on first paint.
@@ -63,24 +70,59 @@ function ListShell({ children }: { children: React.ReactNode }) {
 
 function FeedsList({ list }: { list: Extract<ListResult, { kind: "feeds" }> }) {
 	const router = useRouter();
-	const { subscribe, isSubscribed, hydrated } = useSubscriptions();
+	const session = useSession();
+	const [mySubs, setMySubs] = useState<Set<string> | null>(null);
 	const [added, setAdded] = useState(false);
 
 	const feeds = list.items;
 	const title = list.title ?? "Shared flavors";
 
+	// Only worth knowing which feeds are already followed once signed in — a
+	// signed-out visitor can't follow anything yet, so this only fetches then.
+	useEffect(() => {
+		if (!session) return;
+		let cancelled = false;
+		getMySubscriptions()
+			.then((subs) => {
+				if (!cancelled) setMySubs(new Set(subs.map((s) => s.feedId)));
+			})
+			.catch(() => {
+				// A failed lookup unblocks the button the same as "none known yet".
+				if (!cancelled) setMySubs(new Set());
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [session]);
+
 	const addAll = () => {
-		// subscribe() is additive per-id (it skips ids you already follow), so
-		// it's safe before hydration — but gate on `hydrated` for consistency with
-		// the reading-list import, which is NOT additive.
-		if (!hydrated) return;
-		for (const feed of feeds) subscribe(feed.id);
+		// Subscribing now requires a session — send the visitor to sign in with
+		// `next` pointing back at this exact list so the import completes
+		// naturally once voodoo hands them back here.
+		if (!session) {
+			window.location.href = voodooLoginUrl(window.location.pathname);
+			return;
+		}
+		if (!mySubs) return;
+		const toAdd: { id: string; flavor: string }[] = [];
+		let nextSize = mySubs.size;
+		for (const feed of feeds) {
+			if (mySubs.has(feed.id)) continue;
+			toAdd.push({ id: feed.id, flavor: FLAVORS[nextSize % FLAVORS.length] });
+			nextSize++;
+		}
+		setMySubs((prev) => new Set([...(prev ?? []), ...toAdd.map((f) => f.id)]));
+		for (const { id, flavor } of toAdd) {
+			subscribeFeed({ data: { feedId: id, flavor } }).catch(() => {});
+		}
 		setAdded(true);
 		router.navigate({ to: "/" });
 	};
 
 	// How many of these the recipient doesn't already follow — drives the label.
-	const newCount = feeds.filter((f) => !isSubscribed(f.id)).length;
+	// Signed-out (mySubs === null) reads as "none followed yet" for the label.
+	const newCount = feeds.filter((f) => !mySubs?.has(f.id)).length;
+	const ready = !session || mySubs != null;
 
 	return (
 		<ListShell>
@@ -121,7 +163,7 @@ function FeedsList({ list }: { list: Extract<ListResult, { kind: "feeds" }> }) {
 			{feeds.length > 0 ? (
 				<Button
 					onClick={addAll}
-					disabled={added || !hydrated}
+					disabled={added || !ready}
 					className="rounded-full"
 				>
 					{added ? (
@@ -129,6 +171,8 @@ function FeedsList({ list }: { list: Extract<ListResult, { kind: "feeds" }> }) {
 							<Check className="size-4" aria-hidden />
 							Added!
 						</>
+					) : !session ? (
+						"Sign in to add these flavors"
 					) : (
 						<>
 							<Plus className="size-4" aria-hidden />
@@ -149,8 +193,8 @@ function FeedsList({ list }: { list: Extract<ListResult, { kind: "feeds" }> }) {
  * A reading list (kind 'stories'): a read-only preview of someone's shared
  * collection. If a folder `structure` came along, we group the stories under
  * their folder names (nested by depth); otherwise it's a flat list. "Add to my
- * reading list" runs the best-effort merge into the recipient's own stores and
- * lands them on /saved.
+ * reading list" merges the folders into the recipient's local collection tree
+ * and persists each story's save + collection membership to their account.
  */
 function ReadingList({
 	list,
@@ -158,25 +202,42 @@ function ReadingList({
 	list: Extract<ListResult, { kind: "stories" }>;
 }) {
 	const router = useRouter();
+	const session = useSession();
 	const {
 		collections,
 		hydrated: collectionsHydrated,
 		replaceAll: replaceCollections,
 	} = useCollections();
-	const {
-		saved,
-		hydrated: savedHydrated,
-		replaceAll: replaceSaved,
-	} = useSaved();
+	const [mySaved, setMySaved] = useState<
+		{ storyId: string; savedAt: number; collections: string[] }[] | null
+	>(null);
 	const [added, setAdded] = useState(false);
+	const [importFailed, setImportFailed] = useState(false);
 
 	const stories = list.items;
 	const title = list.title ?? "Shared reading list";
 
-	// Both stores must have hydrated from localStorage before we merge. Until then
-	// `collections`/`saved` are the empty [] fallback, and importing would
-	// replaceAll() over an empty base — wiping a returning user's existing list.
-	const ready = collectionsHydrated && savedHydrated;
+	// Only worth knowing the recipient's existing saves once signed in.
+	useEffect(() => {
+		if (!session) return;
+		let cancelled = false;
+		getMySavedEntries()
+			.then((entries) => {
+				if (!cancelled) setMySaved(entries);
+			})
+			.catch(() => {
+				// A failed lookup unblocks the button the same as "nothing saved yet".
+				if (!cancelled) setMySaved([]);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [session]);
+
+	// The collection tree must have hydrated from localStorage before we merge
+	// folders in, or we'd merge against the empty [] fallback and (harmlessly,
+	// since replaceAll only ever adds) still risk a duplicate on a fast re-click.
+	const ready = collectionsHydrated && (!session || mySaved != null);
 
 	// Parse the folder structure once; null falls back to a flat list.
 	const structure = useMemo(
@@ -184,32 +245,81 @@ function ReadingList({
 		[list.structure],
 	);
 
-	const addAll = () => {
-		// Read current stores, merge the share in, and write both back. The merge
-		// is purely additive (never deletes), so re-importing is safe — but only
-		// once hydrated, or we'd replaceAll() over the empty fallback.
-		if (!ready) return;
+	const addAll = async () => {
+		if (!session) {
+			// `next` points back at this exact shared-list URL, so the import
+			// completes naturally once voodoo hands the reader back here signed in.
+			window.location.href = voodooLoginUrl(window.location.pathname);
+			return;
+		}
+		function sameCollections(a: string[], b: string[]): boolean {
+			if (a.length !== b.length) return false;
+			const setA = new Set(a);
+			return b.every((c) => setA.has(c));
+		}
+		if (!ready || !mySaved) return;
+
+		setImportFailed(false);
+
+		const savedAsEntries = mySaved.map((s) => ({
+			storyId: s.storyId,
+			savedAt: s.savedAt,
+			collections: s.collections,
+		}));
+
+		const pending: Promise<unknown>[] = [];
+
 		if (structure) {
+			// Merge the folders into the local tree and the stories into the local
+			// "saved" shape (mergeSharedCollection is a pure, localStorage-shaped
+			// helper); then persist each touched story's save + membership.
 			const merged = mergeSharedCollection({
 				structure,
 				collections,
-				saved,
+				saved: savedAsEntries,
 				newId: () => crypto.randomUUID(),
 				nextColor: (count) => FLAVORS[count % FLAVORS.length],
 				now: Date.now(),
 			});
 			replaceCollections(merged.collections);
-			replaceSaved(merged.saved);
+			const before = new Map(savedAsEntries.map((s) => [s.storyId, s]));
+			for (const entry of merged.saved) {
+				const prior = before.get(entry.storyId);
+				if (prior && sameCollections(prior.collections, entry.collections)) {
+					continue; // untouched by this import
+				}
+				if (!prior) {
+					pending.push(
+						recordStorySave({ data: { storyId: entry.storyId } }).then(() =>
+							updateSavedCollections({
+								data: {
+									storyId: entry.storyId,
+									collections: entry.collections,
+								},
+							}),
+						),
+					);
+				} else {
+					pending.push(
+						updateSavedCollections({
+							data: { storyId: entry.storyId, collections: entry.collections },
+						}),
+					);
+				}
+			}
 		} else {
 			// No structure — just save the bare stories (preserving existing saves).
-			const existing = new Set(saved.map((s) => s.storyId));
-			const now = Date.now();
-			replaceSaved([
-				...saved,
-				...stories
-					.filter((s) => !existing.has(s.id))
-					.map((s) => ({ storyId: s.id, savedAt: now, collections: [] })),
-			]);
+			const existing = new Set(savedAsEntries.map((s) => s.storyId));
+			for (const s of stories) {
+				if (existing.has(s.id)) continue;
+				pending.push(recordStorySave({ data: { storyId: s.id } }));
+			}
+		}
+
+		const results = await Promise.allSettled(pending);
+		if (results.some((r) => r.status === "rejected")) {
+			setImportFailed(true);
+			return;
 		}
 		setAdded(true);
 		router.navigate({ to: "/saved" });
@@ -242,25 +352,34 @@ function ReadingList({
 			)}
 
 			{stories.length > 0 ? (
-				<Button
-					onClick={addAll}
-					disabled={added || !ready}
-					className="rounded-full"
-				>
-					{added ? (
-						<>
-							<Check className="size-4" aria-hidden />
-							Added!
-						</>
-					) : !ready ? (
-						"Churning…"
-					) : (
-						<>
-							<Plus className="size-4" aria-hidden />
-							Add to my reading list
-						</>
-					)}
-				</Button>
+				<div className="flex flex-col items-start gap-2">
+					<Button
+						onClick={addAll}
+						disabled={added || (!!session && !ready)}
+						className="rounded-full"
+					>
+						{added ? (
+							<>
+								<Check className="size-4" aria-hidden />
+								Added!
+							</>
+						) : !session ? (
+							"Sign in to add this list"
+						) : !ready ? (
+							"Churning…"
+						) : (
+							<>
+								<Plus className="size-4" aria-hidden />
+								Add to my reading list
+							</>
+						)}
+					</Button>
+					{importFailed ? (
+						<p role="alert" className="text-sm text-strawberry-ink">
+							Some flavors failed to save — try again.
+						</p>
+					) : null}
+				</div>
 			) : null}
 		</ListShell>
 	);

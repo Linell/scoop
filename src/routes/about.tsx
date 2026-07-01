@@ -27,8 +27,9 @@ function About() {
 					<p>
 						<span className="font-semibold">Flavors</span> (feeds) and their
 						<span className="font-semibold"> scoops</span> (stories) live in a
-						shared catalog in the database. The flavors you've subscribed to are
-						kept locally on your device - no account or sign up needed!
+						shared catalog in the database. Sign in to follow flavors and save
+						scoops across your devices - browsing and chat still work
+						sign-in-free, served from the catalog's most popular stories.
 					</p>
 					<p>
 						Manage your flavors and feed preferences over on the{" "}
