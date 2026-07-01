@@ -48,25 +48,13 @@ export const summarizeStory = inngest.createFunction(
 
 		const story = await step.run("load-story", () => getStoryById(storyId));
 		if (!story) return { storyId, skipped: "not-found" };
-		// Summaries are shared and immutable; never pay to redo one.
 		if (story.summary) return { storyId, skipped: "already-summarized" };
-		// We now fetch the article page, so a story with an empty feed blurb but a
-		// real URL is still summarizable. Only skip true title-only items: no feed
-		// content AND no URL to fetch means there's nothing to summarize beyond the
-		// title the reader already sees.
+
 		if (!story.content?.trim() && !story.url?.trim())
 			return { storyId, skipped: "no-content" };
 
-		// Best-effort enrichment: fetch the real article (and HN discussion) so the
-		// summary reflects the actual story, not just the feed teaser. Its own step
-		// so it's durable + visible in the dev dashboard; it never throws, so a
-		// failed fetch just yields empty text and summarization proceeds anyway.
 		const enriched = await step.run("fetch-content", () => enrichStory(story));
 
-		// A/B the teaser strategy. Each variant wraps its model call in `step.run`
-		// for durability — `group.experiment` memoizes only the *selection*, not the
-		// variant's work, so the run() is what survives retries. The weighted split
-		// is seeded with the run ID, so a replay always re-selects the same variant.
 		const { result: summary, experimentRef } = await group.experiment(
 			"summary-strategy",
 			{
@@ -87,8 +75,6 @@ export const summarizeStory = inngest.createFunction(
 			saveSummary(storyId, summary, {
 				name: experimentRef.experimentName,
 				variant: experimentRef.variant,
-				// Persist this run id so the (parentless, event-driven) rating handler
-				// can attribute its score back to this run's served variant.
 				runId,
 			}),
 		);
@@ -113,11 +99,6 @@ export const summarizeStory = inngest.createFunction(
 			value: notRefusal(summary),
 		});
 
-		// Seed engagement counters at 0 for THIS variant on this run, so each
-		// experiment's avg-reactions-per-run spans every summarized story, not just
-		// the ones that later drew a reaction. The `score-click`/`score-save` jobs
-		// overwrite these (run-scoped, same name) with the running total when a
-		// reaction lands, attributing back to this run via its id.
 		await inngest.score.experiment({
 			name: "opens",
 			value: 0,
@@ -141,8 +122,7 @@ export const summarizeStory = inngest.createFunction(
 
 		// Defer the LLM-as-judge: it runs as its own retryable scorer run rather
 		// than inline here, so a slow or flaky model call never blocks the summary.
-		// We hand it the served variant via `experiment`, which surfaces on the
-		// scorer's `ctx.parents[0].experiment` so it can attribute its three axes.
+		// We hand it the served variant via `experiment`
 		defer("judge-summary", {
 			function: judgeSummaryScorer,
 			experiment: experimentRef,

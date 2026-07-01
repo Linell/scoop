@@ -93,8 +93,6 @@ export async function summarizeStory(
 
 	const summary = textOf(message);
 
-	// Backstop: if the model still refused (or returned nothing), fall back to
-	// the title rather than caching a refusal
 	if (!summary || looksLikeRefusal(summary)) return story.title;
 
 	return summary;
